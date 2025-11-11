@@ -12,7 +12,7 @@ parser.add_argument("--language", type=str, default="")
 parser.add_argument("--game_env", type=str, default="gomoku")
 parser.add_argument("--game_suffix", type=str, default="gomoku")
 parser.add_argument("--game_server", type=str, default="http://127.0.0.1:9000")
-parser.add_argument("--dir_path", type=str, default="./develop_ai")
+parser.add_argument("--dir_path", type=str, default="./gomoku/AI_develop")
 
 # 循环赛轮次
 parser.add_argument("--round_num", type=int, default=1)
@@ -45,6 +45,16 @@ The final AI should be provided as an HTTP service. You can refer to the guides 
 *The content in {game_env_path}/develop_instruction.md is very important, please read it carefully!*
 
 Please develop your AI service directly under {dir_path}. 
+
+## Expected File Structure
+Your final file structure should look like this (NO subdirectories):
+```
+{dir_path}/
+├── ai_service.py       # Your main AI service file
+├── start_ai.sh         # Startup script
+└── requirements.txt    # (Optional) Python dependencies
+```
+
 ## Script Requirements
 Please implement a script to start your AI service, with the name `start_ai.sh` in {dir_path}. The script must accept exactly one argument, which is the port number to run the HTTP service. You should be able to start the AI service on a specified port by running:
 ```bash
@@ -58,7 +68,8 @@ curl -s http://localhost:<port>/health
 
 
 # Other Requirements
-Use your model name as a prefix in the name of your AI service, i.e., `{model_name}_AI`.
+Use your model name as a prefix in the AI_ID variable inside your code, i.e., AI_ID = "{model_name}_AI".
+**IMPORTANT**: Write all files directly in {dir_path}, do NOT create any subdirectories or folders.
 Develop directly in {dir_path} without repeatedly asking for the next step. Report to me only after you have completed the development.
 
 # Access the main server

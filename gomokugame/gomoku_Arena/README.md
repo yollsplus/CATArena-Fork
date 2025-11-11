@@ -68,16 +68,17 @@ python server.py --port 9000
 # 终端1: 启动第一个AI（在仓库中切换到示例AI目录）
 cd ./gomoku/AI_example
 ./start_ai.sh 11001 "AI_Alpha" "Alpha AI"
+注：这里.sh无法运行，换成 python ai_server.py --port 11001 --ai_id "AI_Alpha" --ai_name "Alpha AI"
 
 # 终端2: 启动第二个AI
 cd ./gomoku/AI_example
 ./start_ai.sh 11002 "AI_Beta" "Beta AI"
+注：这里.sh无法运行，换成 python ai_server.py --port 11002 --ai_id "AI_Beta" --ai_name "Beta AI"
 
 # 终端3: 启动第三个AI（可选）
 cd ./gomoku/AI_example
 ./start_ai.sh 11003 "AI_Gamma" "Gamma AI"
-```
-
+python ai_server.py --port 11003 --ai_id "AI_Gamma" --ai_name "Gamma AI"
 ### 4. 配置AI对战
 
 修改配置文件以匹配启动的AI服务：

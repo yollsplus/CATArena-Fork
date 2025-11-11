@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 import numpy as np
-
+#python demo2_ai.py --port 12002 --ai_id "demo2" --ai_name "demo2"
 app = Flask(__name__)
 
 # AI ID and name

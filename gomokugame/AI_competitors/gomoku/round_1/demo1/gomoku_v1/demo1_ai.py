@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+#python demo1_ai.py --port 12001 --ai_id "demo1" --ai_name "demo1"
 import requests
 import json
 import time
