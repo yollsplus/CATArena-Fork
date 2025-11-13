@@ -377,10 +377,16 @@ Please develop your AI service directly under {dir_path}.
 Your final file structure should look like this (NO subdirectories):
 ```
 {dir_path}/
-├── ai_service.py       # Your main AI service file
+├── ai_service.py       # Your main AI service file (MUST accept --port argument)
 ├── start_ai.sh         # Startup script
 └── requirements.txt    # (Optional) Python dependencies
 ```
+
+**CRITICAL**: Your `ai_service.py` MUST accept a `--port` command-line argument. It will be started with:
+```bash
+python ai_service.py --port <port_number>
+```
+
 
 ## Script Requirements
 Please implement a script to start your AI service, with the name `start_ai.sh` in {dir_path}. The script must accept exactly one argument, which is the port number to run the HTTP service. You should be able to start the AI service on a specified port by running:

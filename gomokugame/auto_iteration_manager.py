@@ -16,6 +16,161 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import glob
+import requests
+import signal
+import atexit
+
+
+class ServiceManager:
+    """简洁的服务进程管理器"""
+    
+    def __init__(self, base_dir: Path):
+        self.base_dir = base_dir
+        self.processes = []  # [(name, process, port), ...]
+        
+        # 注册清理函数
+        atexit.register(self.cleanup)
+    
+    def start_game_server(self, game: str = 'gomoku', port: int = 9000) -> bool:
+        """启动游戏服务器"""
+        print(f"\n🚀 启动游戏服务器 ({game})...")
+        
+        server_dir = self.base_dir / game
+        
+        # 创建日志文件
+        log_dir = self.base_dir / "service_logs"
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / f"{game}_server.log"
+        
+        try:
+            # 将输出重定向到文件，避免管道阻塞
+            with open(log_file, 'w', encoding='utf-8') as f:
+                proc = subprocess.Popen(
+                    [sys.executable, 'server.py'],
+                    cwd=server_dir,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,  # 合并到 stdout
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
+                )
+            
+            self.processes.append(('game_server', proc, port))
+            print(f"   日志文件: {log_file}")
+            
+            # 等待服务启动
+            if self._wait_for_service(f'http://localhost:{port}/health', timeout=15):
+                print(f"   ✅ 游戏服务器已启动 (端口 {port})")
+                return True
+            else:
+                print(f"   ⚠️  游戏服务器启动超时")
+                print(f"   请查看日志: {log_file}")
+                return False
+                
+        except Exception as e:
+            print(f"   ❌ 启动失败: {e}")
+            return False
+    
+    def start_ai_service(self, ai_path: Path, port: int, ai_name: str, ai_id: str = None) -> bool:
+        """启动 AI 服务（只传 --port 参数）"""
+        print(f"🤖 启动 AI 服务: {ai_name} (端口 {port})...")
+        
+        # 找到第一个 .py 文件
+        py_files = [f for f in ai_path.glob("*.py") if f.name != '__init__.py']
+        
+        if not py_files:
+            print(f"   ❌ 找不到 Python 文件")
+            return False
+        
+        py_file = py_files[0].name
+        print(f"   使用文件: {py_file}")
+        
+        # 创建日志文件
+        log_dir = self.base_dir / "service_logs"
+        log_dir.mkdir(exist_ok=True)
+        safe_name = ai_name.replace(' ', '_').replace('/', '_')
+        log_file = log_dir / f"{safe_name}_{port}.log"
+        
+        try:
+            # 只传 --port 参数，如果 AI 不支持就会报错
+            cmd = [sys.executable, py_file, '--port', str(port)]
+            
+            # 将输出重定向到文件，避免管道阻塞
+            with open(log_file, 'w', encoding='utf-8') as f:
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=ai_path,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
+                )
+            
+            self.processes.append((f'ai_{ai_name}', proc, port))
+            print(f"   日志文件: {log_file}")
+            
+            # 等待服务启动
+            if self._wait_for_service(f'http://localhost:{port}/health', timeout=10):
+                print(f"   ✅ {ai_name} 已启动")
+                return True
+            else:
+                # 检查进程是否崩溃
+                if proc.poll() is not None:
+                    print(f"   ❌ AI 启动失败，进程已退出")
+                    print(f"   请查看日志: {log_file}")
+                else:
+                    print(f"   ⚠️  健康检查超时（可能 /health 端点未实现）")
+                return False
+                
+        except Exception as e:
+            print(f"   ❌ 启动失败: {e}")
+            return False
+    
+    def _wait_for_service(self, url: str, timeout: int = 30) -> bool:
+        """等待服务就绪"""
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            try:
+                resp = requests.get(url, timeout=1)
+                if resp.status_code == 200:
+                    return True
+            except:
+                pass
+            time.sleep(0.5)
+        
+        return False
+    
+    def cleanup(self):
+        """清理所有进程"""
+        if not self.processes:
+            return
+        
+        print("\n🧹 清理服务进程...")
+        
+        for name, proc, port in self.processes:
+            try:
+                if proc.poll() is None:  # 进程还在运行
+                    print(f"   停止 {name} (端口 {port})...")
+                    
+                    if sys.platform == 'win32':
+                        # Windows: 发送 CTRL_BREAK_EVENT
+                        proc.send_signal(signal.CTRL_BREAK_EVENT)
+                    else:
+                        # Linux/Mac: 发送 SIGTERM
+                        proc.terminate()
+                    
+                    # 等待进程结束
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        # 强制杀死
+                        proc.kill()
+                        proc.wait()
+                    
+                    print(f"      ✅ 已停止")
+            except Exception as e:
+                print(f"      ⚠️  停止失败: {e}")
+        
+        self.processes.clear()
+        print("✅ 清理完成\n")
 
 
 class AutoIterationManager:
@@ -30,6 +185,9 @@ class AutoIterationManager:
         # 创建输出目录
         self.output_dir = self.base_dir / "auto_iteration_output"
         self.output_dir.mkdir(exist_ok=True)
+        
+        # 创建服务管理器
+        self.service_manager = ServiceManager(self.base_dir)
         
         print("=" * 80)
         print("CATArena 自动化迭代管理器")
@@ -137,15 +295,17 @@ class AutoIterationManager:
                 '--game_suffix', self.config['game']
             ]
         else:
-            # Round 2+: 先检查上一轮的代码目录是否存在
-            prev_round_dir = self.base_dir / f"AI_competitors/{self.config['game']}/round_{round_num-1}"
+            # Round 2+: 使用新结构查找上一轮代码目录
+            # 新结构: AI_competitors/gomoku/<model_name>/v<round-1>/
+            model_name = f"{self.config['agent']['model']}_ai"
+            prev_round_dir = self.base_dir / f"AI_competitors/{self.config['game']}/{model_name}/v{round_num-1}"
+            
             if not prev_round_dir.exists():
                 print(f"\n⚠️  错误: 找不到上一轮的代码目录: {prev_round_dir}")
                 print(f"请先完成以下步骤:")
-                print(f"  1. 将 Round {round_num-1} 的 Agent 响应中的代码提取出来")
-                print(f"  2. 保存到 {prev_round_dir}")
-                print(f"  3. 然后再继续运行 Round {round_num}")
-                print(f"\n提示: Agent 响应已保存在 ./auto_iteration_output/round_{round_num-1}_response.json")
+                print(f"  1. 确保 Round {round_num-1} 已经运行完成")
+                print(f"  2. 代码应该在: {prev_round_dir}")
+                print(f"\n提示: Agent 响应已保存在 ./auto_iteration_output/round_{round_num-1}_agent_response.json")
                 return ""
             
             # Round 2+: 使用 ChatPromptWithLlm.py 分析上一轮
@@ -159,7 +319,7 @@ class AutoIterationManager:
                     '--model_name', f"{self.config['agent']['model']}_ai_v{round_num}",
                     '--round_num', str(round_num),
                     '--log_path', './reports',
-                    '--last_round_dir', f'./AI_competitors/{self.config["game"]}/round_{round_num-1}',
+                    '--last_round_dir', str(prev_round_dir),
                     '--llm_api_url', llm_config['api_url'],
                     '--llm_api_key', llm_config['api_key'],
                     '--llm_model', llm_config['model']
@@ -171,7 +331,7 @@ class AutoIterationManager:
                     '--model_name', f"{self.config['agent']['model']}_ai_v{round_num}",
                     '--round_num', str(round_num),
                     '--log_path', './reports',
-                    '--last_round_dir', f'./AI_competitors/{self.config["game"]}/round_{round_num-1}',
+                    '--last_round_dir', str(prev_round_dir),
                     '--game_env', self.config['game'],
                     '--game_suffix', self.config['game']
                 ]
@@ -443,10 +603,10 @@ class AutoIterationManager:
         for f in py_files:
             print(f"   - {f.name}")
         
-        # 目标目录：AI_competitors/gomoku/round_N/<ai_name>/
-        ai_name = f"{self.config['agent']['model']}_ai_v{round_num}"
-        target_base = self.base_dir / "AI_competitors" / self.config['game'] / f"round_{round_num}"
-        target_dir = target_base / ai_name / f"{self.config['game']}_v1"
+        # 新结构：AI_competitors/gomoku/<model_name>/v<round_num>/
+        model_name = f"{self.config['agent']['model']}_ai"
+        target_base = self.base_dir / "AI_competitors" / self.config['game'] / model_name
+        target_dir = target_base / f"v{round_num}"
         
         # 创建目标目录
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -483,22 +643,113 @@ class AutoIterationManager:
         return True
     
     def _should_run_arena(self, round_num: int) -> bool:
-        """检查是否应该运行对战"""
-        # 检查是否有AI代码部署
-        ai_dir = self.base_dir / f"AI_competitors/{self.config['game']}/round_{round_num}"
+        """检查是否应该运行对战（新结构：先模型后版本）"""
+        competitors_dir = self.base_dir / f"AI_competitors/{self.config['game']}"
         
-        if not ai_dir.exists():
-            print(f"⚠️  未找到 Round {round_num} 的AI代码目录: {ai_dir}")
+        if not competitors_dir.exists():
+            print(f"⚠️  未找到 AI_competitors 目录: {competitors_dir}")
             return False
         
-        # 检查是否有AI子目录
-        ai_subdirs = [d for d in ai_dir.iterdir() if d.is_dir()]
-        if not ai_subdirs:
-            print(f"⚠️  Round {round_num} 没有AI代码")
+        # 统计可用的 AI（跳过 round_* 旧目录）
+        available_ais = []
+        for model_dir in competitors_dir.iterdir():
+            if model_dir.is_dir() and not model_dir.name.startswith('round_'):
+                # 检查是否有版本目录
+                version_dirs = list(model_dir.glob('v*'))
+                if version_dirs:
+                    available_ais.append(model_dir.name)
+        
+        if not available_ais:
+            print(f"⚠️  没有找到可用的 AI")
             return False
         
-        print(f"✅ 找到 {len(ai_subdirs)} 个AI: {[d.name for d in ai_subdirs]}")
+        print(f"✅ 找到 {len(available_ais)} 个 AI: {available_ais}")
         return True
+    
+    def _start_all_services(self, round_num: int) -> bool:
+        """
+        自动启动所有服务
+        
+        Args:
+            round_num: 当前轮次
+            
+        Returns:
+            是否全部启动成功
+        """
+        print("\n" + "=" * 60)
+        print("自动启动服务")
+        print("=" * 60)
+        
+        game = self.config['game']
+        
+        # 1. 启动游戏服务器
+        if not self.service_manager.start_game_server(game):
+            print("\n❌ 游戏服务器启动失败")
+            return False
+        
+        # 2. 加载 Arena 配置获取 AI 信息
+        try:
+            arena_path = self.base_dir / f"{game}_Arena"
+            config_file = arena_path / "configs" / "round_1_config.json"
+            
+            with open(config_file, 'r', encoding='utf-8') as f:
+                arena_config = json.load(f)
+            
+            ais = arena_config.get('ais', [])
+            
+            if not ais:
+                print("\n⚠️  配置文件中没有 AI")
+                return False
+            
+            # 3. 启动所有 AI 服务
+            success_count = 0
+            for ai in ais:
+                ai_id = ai['ai_id']
+                port = ai['port']
+                ai_name = ai['ai_name']
+                
+                # 查找 AI 代码路径
+                ai_path = self._find_ai_path(ai_id, round_num)
+                
+                if not ai_path:
+                    print(f"\n⚠️  找不到 {ai_name} 的代码路径，跳过")
+                    continue
+                
+                if self.service_manager.start_ai_service(ai_path, port, ai_name, ai_id):
+                    success_count += 1
+            
+            print("\n" + "=" * 60)
+            print(f"服务启动完成: {success_count}/{len(ais)} 个 AI 成功启动")
+            print("=" * 60)
+            
+            return success_count > 0
+            
+        except Exception as e:
+            print(f"\n❌ 启动服务时出错: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _find_ai_path(self, ai_id: str, round_num: int) -> Optional[Path]:
+        """查找 AI 代码路径（支持新旧两种结构）"""
+        game = self.config['game']
+        competitors_dir = self.base_dir / f"AI_competitors/{game}"
+        
+        if not competitors_dir.exists():
+            return None
+        
+        # 方案1: 新结构 AI_competitors/gomoku/<model>/v<N>/
+        for model_dir in competitors_dir.iterdir():
+            if model_dir.is_dir() and not model_dir.name.startswith('round_'):
+                # 检查模型名是否匹配
+                if ai_id in model_dir.name or model_dir.name in ai_id:
+                    # 查找最新版本或指定版本
+                    version_dirs = sorted(model_dir.glob('v*'), reverse=True)
+                    for ver_dir in version_dirs:
+                        if ver_dir.is_dir() and any(ver_dir.glob('*.py')):
+                            return ver_dir
+        
+        return None
     
     def _run_arena(self, round_num: int) -> Dict[str, Any]:
         """
@@ -514,8 +765,15 @@ class AutoIterationManager:
         
         game = self.config['game']
         
+        # 自动启动所有服务
+        if not self._start_all_services(round_num):
+            return {
+                "error": "服务启动失败",
+                "timestamp": datetime.now().isoformat()
+            }
+        
         # 运行对战
-        print("开始对战...")
+        print("\n开始对战...")
         
         try:
             # 导入 arena 模块
