@@ -99,7 +99,7 @@ if round_num  > 1:
     # find last one
     assert os.path.exists(last_round_log_dir), f"上一轮的日志不存在: {last_round_log_dir}"
     prompt_data = prompt_data + f"\n Tournament report of last round is in {last_round_info} and detailed history in {last_round_log_dir}. The historical records json are quite large. Please use tools `start_interactive_shell` and `run_interactive_shell` to analyze the data efficiently. You can use head or tail to pre-view the data, or use python to load this json file."
-    prompt_data = prompt_data + f"\n The code of the previous round corresponding to the log is stored in:  {last_round_dir}. Please learn from it and improve your strategy. " 
+    prompt_data = prompt_data + f"\n\n**CRITICAL INSTRUCTION**: The code of the previous round is stored in: {last_round_dir}. You MUST read the previous code, analyze the tournament results, and then IMMEDIATELY update the files in {dir_path} with improved strategies. DO NOT ask for confirmation - directly modify the code files using edit_file or write_file tools. Your task is NOT complete until you have written the improved code to {dir_path}." 
 
 if language:
     prompt_data = prompt_data + f"\n{language} is the language you should use to develop your AI service."

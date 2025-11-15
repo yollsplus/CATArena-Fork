@@ -291,7 +291,7 @@ class MCPAgentRunner:
                 return {
                     "content": message.content,
                     "model": self.model,
-                    "usage": response.usage._asdict() if response.usage else {},
+                    "usage": response.usage.model_dump() if response.usage else {},
                     "iterations": iteration + 1
                 }
             
@@ -434,5 +434,25 @@ def run_agent_with_mcp_sync(
     """
     runner = MCPAgentRunner(api_key, api_url, model, workspace_root)
     
-    # 在新的事件循环中运行
-    return asyncio.run(runner.run_agent_with_mcp(prompt, max_iterations))
+    # 尝试获取现有事件循环，如果没有则创建新的
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # 没有运行中的事件循环，使用 asyncio.run
+        return asyncio.run(runner.run_agent_with_mcp(prompt, max_iterations))
+    else:
+        # 已经有运行中的事件循环，在新线程中运行
+        import concurrent.futures
+        import threading
+        
+        def run_in_new_loop():
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                return new_loop.run_until_complete(runner.run_agent_with_mcp(prompt, max_iterations))
+            finally:
+                new_loop.close()
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(run_in_new_loop)
+            return future.result()

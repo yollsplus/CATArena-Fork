@@ -461,15 +461,21 @@ if round_num > 1:
         prompt_data += f"  - Detailed history: {last_round_log_dir}\n"
         prompt_data += f"  - Previous AI code: {last_round_dir}\n\n"
         prompt_data += f"You may reference the raw data if you need more specific details, "
-        prompt_data += f"but the summary above contains the most critical strategic insights.\n"
+        prompt_data += f"but the summary above contains the most critical strategic insights.\n\n"
+        prompt_data += f"**CRITICAL INSTRUCTION**: You MUST now read the previous code from {last_round_dir}, "
+        prompt_data += f"analyze the insights above, and then IMMEDIATELY update the files in {dir_path} with improved strategies. "
+        prompt_data += f"DO NOT ask 'Would you like to proceed?' - directly modify the code using edit_file or write_file tools. "
+        prompt_data += f"Your task is NOT complete until you have written the improved code to {dir_path}.\n"
     else:
         # 如果LLM分析失败,回退到原始方式
         print("\n[WARNING] LLM分析失败，使用原始数据引用方式...")
         prompt_data += f"\n\nTournament report of last round is in {last_round_info} and detailed history in {last_round_log_dir}. "
         prompt_data += f"The historical records json are quite large. Please use tools `start_interactive_shell` and `run_interactive_shell` to analyze the data efficiently. "
         prompt_data += f"You can use head or tail to pre-view the data, or use python to load this json file.\n"
-        prompt_data += f"The code of the previous round corresponding to the log is stored in: {last_round_dir}. "
-        prompt_data += f"Please learn from it and improve your strategy.\n"
+        prompt_data += f"\n**CRITICAL INSTRUCTION**: The code of the previous round is stored in: {last_round_dir}. "
+        prompt_data += f"You MUST read the previous code, analyze the tournament results, and then IMMEDIATELY update the files in {dir_path} with improved strategies. "
+        prompt_data += f"DO NOT ask for confirmation - directly modify the code files using edit_file or write_file tools. "
+        prompt_data += f"Your task is NOT complete until you have written the improved code to {dir_path}.\n"
 
 # 添加语言要求
 if language:

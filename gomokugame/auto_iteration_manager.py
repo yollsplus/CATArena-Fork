@@ -416,6 +416,9 @@ class AutoIterationManager:
             
         except Exception as e:
             print(f"⚠️  发送失败: {e}")
+            # 打印完整的错误堆栈
+            import traceback
+            traceback.print_exc()
             return {
                 "error": str(e),
                 "content": "",
