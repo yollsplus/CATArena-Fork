@@ -37,54 +37,97 @@ last_round_dir = args.last_round_dir
 game_env_path = f'./{game_env}'
 
 
-prompt_data = f'''
-# Game Development
-There is a game project under {game_env_path}. You need to read its source code and develop a game AI. Your AI will compete against other AIs in a tournament, so please make your AI as strategic and competitive as possible.
+if round_num == 1:
+    # Round 1: 基于模板开发
+    prompt_data = f'''
+# Round 1: Implement Gomoku AI Strategy
 
-The final AI should be provided as an HTTP service. You can refer to the guides in {game_env_path}/README.md and {game_env_path}/develop_instruction.md for development instructions.
-*The content in {game_env_path}/develop_instruction.md is very important, please read it carefully!*
+**CRITICAL**: You MUST use `edit_file` to modify ONLY the TODO section. DO NOT use `write_file`.
 
-Please develop your AI service directly under {dir_path}. 
+**Required steps (DO NOT skip)**:
+1. Call `read_text_file('{dir_path}/ai_service.py')` - read template
+2. Locate the TODO section marked with `# ====` in `select_best_move()`
+3. Call `edit_file('{dir_path}/ai_service.py')` with:
+   - `oldText`: The exact TODO section including markers
+   - `newText`: Your strategy implementation with:
+     * `candidates = self._get_empty_positions_near_stones(board)`
+     * Loop through candidates and evaluate each
+     * Return best move
+   - Keep the fallback `return self._get_random_empty_position(board)`
 
-## Expected File Structure
-Your final file structure should look like this (NO subdirectories):
+**Available helper functions**:
+- `_find_winning_move(board, color)` - find winning move
+- `_check_win(board, x, y, color)` - check if position wins
+- `_get_empty_positions_near_stones(board)` - get candidate positions
+- `_count_consecutive(board, x, y, color, dx, dy)` - count consecutive stones
+
+**FORBIDDEN**:
+✗ Do NOT use `write_file` (will corrupt the file)
+✗ Do NOT modify Flask endpoints or helper functions
+✗ Do NOT include undefined functions in your code
+
+**Success criteria**:
+✓ Use `edit_file` with exact oldText/newText
+✓ Code runs without syntax errors
+✓ All functions you call are defined
+
+**Reference**: `{dir_path}/README.md` for details'''
+else:
+    # Round 2+: 基于上一轮改进
+    prompt_data = f'''
+# Round {round_num}: Improve Strategy Based on Tournament Results
+
+**STEP 1**: Read your v{round_num-1} strategy
 ```
-{dir_path}/
-├── ai_service.py       # Your main AI service file (MUST accept --port argument)
-├── start_ai.sh         # Startup script
-└── requirements.txt    # (Optional) Python dependencies
+read_text_file('{last_round_dir}/ai_service.py')
 ```
 
-**CRITICAL**: Your `ai_service.py` MUST accept a `--port` command-line argument. It will be started with:
-```bash
-python ai_service.py --port <port_number>
+**STEP 2**: Analyze tournament data below:
+- Your win rate vs opponents
+- Where you lost (opening/mid-game/end-game)
+- What tactics won games
+
+**STEP 3**: Call `edit_file` to enhance your strategy - DO THIS NOW
+
+Improvements to make:
+1. **Better threat detection** - recognize 4-in-a-row patterns earlier
+2. **Smarter positioning** - prioritize center and key intersections
+3. **Pattern recognition** - detect live-3, live-4 formations
+
+Example enhancement:
+```
+edit_file('{dir_path}/ai_service.py', {{
+  "oldText": "for candidate in candidates:\\n            x, y = candidate\\n            score = 0",
+  "newText": "for candidate in candidates:\\n            x, y = candidate\\n            score = 0\\n            \\n            # Prioritize center positions\\n            center_dist = abs(x - 7) + abs(y - 7)\\n            score += (14 - center_dist) * 2"
+}})
 ```
 
-## Script Requirements
-Please implement a script to start your AI service, with the name `start_ai.sh` in {dir_path}. The script must accept exactly one argument, which is the port number to run the HTTP service. You should be able to start the AI service on a specified port by running:
-```bash
-bash start_ai.sh <port>
-```
-Your AI service should listen on the given port, and you can check its health status by running:
-```bash
-curl -s http://localhost:<port>/health
-```
-**Note:**  The script should not accept any other arguments except for the port number. Make sure your AI service uses this port for HTTP requests.
+**YOU MUST CALL edit_file NOW**. Implement concrete improvements based on tournament performance.
 
+**CODE QUALITY REQUIREMENTS**:
+✓ Correct Python indentation (4 spaces)
+✓ Variables declared before use
+✓ Loop variables stay inside loop body
+✓ No undefined function calls
 
-# Other Requirements
-Use your model name as a prefix in the AI_ID variable inside your code, i.e., AI_ID = "{model_name}_AI".
-**IMPORTANT**: Write all files directly in {dir_path}, do NOT create any subdirectories or folders.
-Develop directly in {dir_path} without repeatedly asking for the next step. Report to me only after you have completed the development.
+**Tournament Results** (analyze win/loss patterns):
+'''
 
-# Access the main server
-You can play game of {game_env_path} in at {game_server}. You can play the games with your own AI or any other AI to improve your strategy. 
-You can use bash tools to self-play to improve yourself.
+# 添加通用要求
+prompt_data += f'''
 
-# Final Remind
-You should write game-play strategy by yourself, do not use any external game engine or API.
-Do not set venv environment in your dir, just use python3 from bash.
-You should write start_ai.sh in {dir_path} and implement the AI service in {dir_path}. DO NOT MODIFY THE CODE IN {game_env_path}.
+## File Requirements
+- `{dir_path}/ai_service.py` - Main service (must accept `--port` argument)
+- `{dir_path}/start_ai.sh` - Startup script: `bash start_ai.sh <port>`
+- `{dir_path}/requirements.txt` - Dependencies (optional)
+- AI_ID = "{model_name}_AI"
+- No subdirectories, write files directly in {dir_path}
+
+## Rules
+- Write strategy yourself (no external engines/APIs)
+- Use python3 from bash (no venv)
+- Do NOT modify code in {game_env_path}
+- Develop directly without asking for next steps
 '''.strip()
 
 
@@ -96,10 +139,9 @@ if round_num  > 1:
     last_round_log_dir = sorted(last_round_log_dir, key=lambda x: int(x.split('_')[-1].split('.')[0]))[-1]
     last_round_info = glob.glob(os.path.join(log_path, f'*_arena_report_*.csv'))
     last_round_info = sorted(last_round_info, key=lambda x: int(x.split('_')[-1].split('.')[0]))[-1]
-    # find last one
     assert os.path.exists(last_round_log_dir), f"上一轮的日志不存在: {last_round_log_dir}"
-    prompt_data = prompt_data + f"\n Tournament report of last round is in {last_round_info} and detailed history in {last_round_log_dir}. The historical records json are quite large. Please use tools `start_interactive_shell` and `run_interactive_shell` to analyze the data efficiently. You can use head or tail to pre-view the data, or use python to load this json file."
-    prompt_data = prompt_data + f"\n\n**CRITICAL INSTRUCTION**: The code of the previous round is stored in: {last_round_dir}. You MUST read the previous code, analyze the tournament results, and then IMMEDIATELY update the files in {dir_path} with improved strategies. DO NOT ask for confirmation - directly modify the code files using edit_file or write_file tools. Your task is NOT complete until you have written the improved code to {dir_path}." 
+    
+    prompt_data += f"\n\n## Tournament Data\n- Report: {last_round_info}\n- History: {last_round_log_dir}\n- Previous code: {last_round_dir}" 
 
 if language:
     prompt_data = prompt_data + f"\n{language} is the language you should use to develop your AI service."

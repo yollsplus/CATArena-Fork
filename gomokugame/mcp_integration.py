@@ -9,6 +9,7 @@ MCP (Model Context Protocol) 集成模块
 
 import asyncio
 import json
+import ast
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
@@ -105,6 +106,25 @@ class MCPFileSystemClient:
                 }
             }
             tools.append(tool_def)
+            
+        # 添加本地智能工具
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "replace_python_method",
+                "description": "Smartly replaces a method in a Python class, automatically fixing indentation. Use this for updating AI strategy.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Path to the python file"},
+                        "class_name": {"type": "string", "description": "Name of the class (e.g. GomokuAI)"},
+                        "method_name": {"type": "string", "description": "Name of the method (e.g. select_best_move)"},
+                        "new_code": {"type": "string", "description": "The complete new code for the method (including def line)"}
+                    },
+                    "required": ["path", "class_name", "method_name", "new_code"]
+                }
+            }
+        })
         
         return tools
     
@@ -119,6 +139,10 @@ class MCPFileSystemClient:
         Returns:
             工具执行结果
         """
+        # 拦截本地智能工具
+        if tool_name == "replace_python_method":
+            return self._handle_replace_python_method(arguments)
+
         if not self.session:
             raise RuntimeError("MCP session not connected. Use 'async with client.connect():'")
         
@@ -190,6 +214,119 @@ class MCPFileSystemClient:
                 "error": str(e)
             }
     
+    def _handle_replace_python_method(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """处理 Python 方法替换"""
+        try:
+            path_str = arguments.get('path')
+            class_name = arguments.get('class_name')
+            method_name = arguments.get('method_name')
+            new_code = arguments.get('new_code')
+            
+            # 路径处理
+            if not Path(path_str).is_absolute():
+                file_path = (self.workspace_root / path_str).resolve()
+            else:
+                file_path = Path(path_str).resolve()
+                
+            # 权限检查
+            if not self._is_path_writable(file_path):
+                return {"error": f"Write access denied: {file_path} is read-only"}
+            
+            if not file_path.exists():
+                return {"error": f"File not found: {file_path}"}
+                
+            # 读取文件
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+            # 解析 AST
+            try:
+                tree = ast.parse(content)
+            except SyntaxError as e:
+                return {"error": f"File has syntax errors, cannot parse: {e}"}
+                
+            # 查找目标方法
+            target_node = None
+            target_class_node = None
+            
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef) and node.name == class_name:
+                    target_class_node = node
+                    for item in node.body:
+                        if isinstance(item, ast.FunctionDef) and item.name == method_name:
+                            target_node = item
+                            break
+                    if target_node:
+                        break
+            
+            if not target_node:
+                return {"error": f"Method {method_name} not found in class {class_name}"}
+                
+            # 获取目标方法的行号范围 (1-based)
+            start_line = target_node.lineno
+            end_line = target_node.end_lineno
+            
+            # 读取原始行
+            lines = content.splitlines()
+            
+            # 获取目标方法的缩进
+            # start_line - 1 是因为 list 是 0-based
+            original_start_line_content = lines[start_line - 1]
+            indentation = original_start_line_content[:len(original_start_line_content) - len(original_start_line_content.lstrip())]
+            
+            # 处理新代码的缩进
+            new_lines = new_code.strip().splitlines()
+            
+            # 检查新代码是否已经有缩进
+            if new_lines and new_lines[0].startswith(' '):
+                # 假设第一行是 def ...，如果它已经有缩进，我们计算相对缩进
+                current_indent = new_lines[0][:len(new_lines[0]) - len(new_lines[0].lstrip())]
+                if current_indent != indentation:
+                    # 调整缩进
+                    adjusted_lines = []
+                    for line in new_lines:
+                        if line.strip():
+                            # 移除原有缩进，添加目标缩进
+                            line_content = line[len(current_indent):] if line.startswith(current_indent) else line.lstrip()
+                            adjusted_lines.append(indentation + line_content)
+                        else:
+                            adjusted_lines.append("")
+                    new_lines = adjusted_lines
+            else:
+                # 如果新代码没有缩进（顶格写），给每一行添加缩进
+                adjusted_lines = []
+                for line in new_lines:
+                    if line.strip():
+                        adjusted_lines.append(indentation + line)
+                    else:
+                        adjusted_lines.append("")
+                new_lines = adjusted_lines
+                
+            # 替换内容
+            # 注意：lines[start_line-1 : end_line] 是要被替换的部分
+            final_lines = lines[:start_line-1] + new_lines + lines[end_line:]
+            
+            # 写回文件
+            new_content = "\n".join(final_lines)
+            
+            # 验证新代码是否有语法错误
+            try:
+                ast.parse(new_content)
+            except SyntaxError as e:
+                return {"error": f"Generated code would cause syntax error: {e}"}
+            
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+                
+            return {
+                "success": True, 
+                "message": f"Successfully replaced method {class_name}.{method_name} in {path_str}",
+                "lines_changed": len(new_lines)
+            }
+            
+        except Exception as e:
+            return {"error": f"Smart edit failed: {str(e)}"}
+
     def _is_path_allowed(self, path: Path) -> bool:
         """检查路径是否在允许访问的范围内（读取权限）"""
         path_str = str(path)

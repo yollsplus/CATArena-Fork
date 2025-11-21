@@ -9,18 +9,28 @@ from pathlib import Path
 
 
 def clean_ai_develop():
-    """清理 AI_develop 目录"""
-    ai_develop = Path(__file__).parent / "gomoku" / "AI_develop"
+    """从 AI_develop_backup 恢复模板到 AI_develop"""
+    base_path = Path(__file__).parent / "gomoku"
+    ai_develop = base_path / "AI_develop"
+    ai_backup = base_path / "AI_develop_backup"
+    
+    if not ai_backup.exists():
+        print(f"❌ 错误: 备份目录不存在: {ai_backup}")
+        return
+    
+    # 删除现有的 AI_develop
     if ai_develop.exists():
         shutil.rmtree(ai_develop)
-        print(f"✅ 已清理: {ai_develop}")
-    else:
-        print(f"⏭️  跳过: {ai_develop} (不存在)")
+        print(f"🗑️  已删除: {ai_develop}")
+    
+    # 从备份复制
+    shutil.copytree(ai_backup, ai_develop)
+    print(f"✅ 已恢复模板: {ai_backup} -> {ai_develop}")
 
 
 def clean_gpt_ai():
-    """清理 gpt-4o-mini_ai 目录"""
-    gpt_ai = Path(__file__).parent / "AI_competitors" / "gomoku" / "gpt-4o-mini_ai"
+    """清理 gpt-4o_ai 目录"""
+    gpt_ai = Path(__file__).parent / "AI_competitors" / "gomoku" / "gpt-4o_ai"
     if gpt_ai.exists():
         shutil.rmtree(gpt_ai)
         print(f"✅ 已清理: {gpt_ai}")
@@ -58,6 +68,6 @@ if __name__ == "__main__":
             print("  python tools.py          # 清理所有")
             print("  python tools.py all      # 清理所有")
             print("  python tools.py develop  # 仅清理 AI_develop")
-            print("  python tools.py gpt      # 仅清理 gpt-4o-mini_ai")
+            print("  python tools.py gpt      # 仅清理 gpt-4o_ai")
     else:
         clean_all()

@@ -51,16 +51,16 @@ def test_service_manager():
         else:
             print(f"⚠️  找不到 demo2 路径: {demo2_path}")
         
-        # 4. 启动 gpt-4o-mini AI
-        print("\n4️⃣ 测试启动 gpt-4o-mini_ai_v1...")
-        gpt_path = base_dir / "AI_competitors/gomoku/round_1/gpt-4o-mini_ai_v1/gomoku_v1"
+        # 4. 启动 gpt-4o AI
+        print("\n4️⃣ 测试启动 gpt-4o_ai_v1...")
+        gpt_path = base_dir / "AI_competitors/gomoku/round_1/gpt-4o_ai_v1/gomoku_v1"
         if gpt_path.exists():
-            if manager.start_ai_service(gpt_path, 12003, "GPT-4o-mini AI v1"):
-                print("✅ gpt-4o-mini_ai_v1 启动成功")
+            if manager.start_ai_service(gpt_path, 12003, "GPT-4o AI v1"):
+                print("✅ gpt-4o_ai_v1 启动成功")
             else:
-                print("❌ gpt-4o-mini_ai_v1 启动失败")
+                print("❌ gpt-4o_ai_v1 启动失败")
         else:
-            print(f"⚠️  找不到 gpt-4o-mini_ai_v1 路径: {gpt_path}")
+            print(f"⚠️  找不到 gpt-4o_ai_v1 路径: {gpt_path}")
         
         # 5. 等待用户按键
         print("\n" + "=" * 60)

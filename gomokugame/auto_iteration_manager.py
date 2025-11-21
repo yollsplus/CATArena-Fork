@@ -19,6 +19,8 @@ import glob
 import requests
 import signal
 import atexit
+import anthropic
+from openai import OpenAI
 
 
 class ServiceManager:
@@ -295,16 +297,15 @@ class AutoIterationManager:
                 '--game_suffix', self.config['game']
             ]
         else:
-            # Round 2+: 使用新结构查找上一轮代码目录
-            # 新结构: AI_competitors/gomoku/<model_name>/v<round-1>/
-            model_name = f"{self.config['agent']['model']}_ai"
-            prev_round_dir = self.base_dir / f"AI_competitors/{self.config['game']}/{model_name}/v{round_num-1}"
+            # Round 2+: 读取 AI_develop 目录（Agent在Round 1工作的地方）
+            # Agent应该读它自己上一轮编辑的代码，而不是已经被复制走的版本
+            prev_round_dir = self.base_dir / f"{self.config['game']}/AI_develop"
             
             if not prev_round_dir.exists():
-                print(f"\n⚠️  错误: 找不到上一轮的代码目录: {prev_round_dir}")
+                print(f"\n⚠️  错误: 找不到 AI_develop 目录: {prev_round_dir}")
                 print(f"请先完成以下步骤:")
                 print(f"  1. 确保 Round {round_num-1} 已经运行完成")
-                print(f"  2. 代码应该在: {prev_round_dir}")
+                print(f"  2. AI_develop 目录应该存在并包含上一轮的代码")
                 print(f"\n提示: Agent 响应已保存在 ./auto_iteration_output/round_{round_num-1}_agent_response.json")
                 return ""
             
@@ -447,11 +448,6 @@ class AutoIterationManager:
             result['timestamp'] = datetime.now().isoformat()
             return result
         else:
-            # 原始的简单 API 调用（无工具）
-            try:
-                from openai import OpenAI
-            except ImportError:
-                raise ImportError("需要安装 openai 库: pip install openai")
             
             client = OpenAI(
                 api_key=self.config['agent']['api_key'],
@@ -503,11 +499,6 @@ class AutoIterationManager:
             result['timestamp'] = datetime.now().isoformat()
             return result
         else:
-            # 原始的简单 API 调用（无工具）
-            try:
-                import anthropic
-            except ImportError:
-                raise ImportError("需要安装 anthropic 库: pip install anthropic")
             
             client = anthropic.Anthropic(
                 api_key=self.config['agent']['api_key']
@@ -706,16 +697,27 @@ class AutoIterationManager:
             
             # 3. 启动所有 AI 服务
             success_count = 0
+            target_model = self.config['agent']['model']  # e.g. "gpt-4o"
+            
             for ai in ais:
                 ai_id = ai['ai_id']
                 port = ai['port']
                 ai_name = ai['ai_name']
                 
+                # 动态更新迭代 AI 的 ID 和 Name
+                # 如果 ai_id 包含我们的模型名，说明这是我们要迭代的 AI
+                if target_model in ai_id:
+                    # 强制更新为当前轮次版本
+                    new_ai_id = f"{target_model}_ai_v{round_num}"
+                    print(f"   🔄 动态更新 AI 版本: {ai_id} -> {new_ai_id}")
+                    ai_id = new_ai_id
+                    ai_name = f"{target_model.upper()} AI v{round_num}"
+                
                 # 查找 AI 代码路径
                 ai_path = self._find_ai_path(ai_id, round_num)
                 
                 if not ai_path:
-                    print(f"\n⚠️  找不到 {ai_name} 的代码路径，跳过")
+                    print(f"\n⚠️  找不到 {ai_name} ({ai_id}) 的代码路径，跳过")
                     continue
                 
                 if self.service_manager.start_ai_service(ai_path, port, ai_name, ai_id):
@@ -819,6 +821,12 @@ class AutoIterationManager:
             print(f"参赛AI数量: {len(selected_ais)}")
             
             for ai in selected_ais:
+                # 动态更新迭代 AI 的 ID 和 Name
+                target_model = self.config['agent']['model']
+                if target_model in ai['ai_id']:
+                    ai['ai_id'] = f"{target_model}_ai_v{round_num}"
+                    ai['ai_name'] = f"{target_model.upper()} AI v{round_num}"
+                
                 arena.add_ai(ai['ai_id'], ai['ai_name'], ai['port'])
                 print(f"  - {ai['ai_name']} (端口: {ai['port']})")
             

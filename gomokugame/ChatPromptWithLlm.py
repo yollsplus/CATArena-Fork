@@ -23,7 +23,7 @@ parser.add_argument("--last_round_dir", type=str, default=None)
 # LLM相关参数
 parser.add_argument("--llm_api_url", type=str, default="https://az.gptplus5.com/v1/chat/completions", help="LLM API的URL")
 parser.add_argument("--llm_api_key", type=str, default="sk-2p51ZI79J5X4OL6S343c17F08f3c432395C711608b2eB0D5", help="LLM API的密钥")
-parser.add_argument("--llm_model", type=str, default="gpt-4o-mini", help="使用的LLM模型")
+parser.add_argument("--llm_model", type=str, default="gpt-4o", help="使用的LLM模型")
 parser.add_argument("--summary_output_path", type=str, default="./last_round_summary.json", help="LLM总结输出路径")
 
 
@@ -64,7 +64,7 @@ def call_llm_api(prompt, api_url, api_key, model):
             "messages": [
                 {
                     "role": "system",
-                    "content": "你是一个五子棋游戏AI策略分析专家，擅长分析对局数据并提炼出关键的战术和策略要点。"
+                    "content": "You are a Gomoku AI strategy expert. Analyze game data and provide actionable improvement suggestions."
                 },
                 {
                     "role": "user",
@@ -72,7 +72,7 @@ def call_llm_api(prompt, api_url, api_key, model):
                 }
             ],
             "temperature": 0.7,
-            "max_tokens": 4000
+            "max_tokens": 2000
         }
         
         response = requests.post(api_url, headers=headers, json=data, timeout=120)
@@ -169,120 +169,44 @@ def create_llm_analysis_prompt(data_summary):
     Returns:
         提示词字符串
     """
-    prompt = """# 五子棋AI对战数据分析任务
+    prompt = """# Gomoku AI Tournament Analysis
 
-你是一个五子棋游戏AI策略分析专家。请分析以下上一轮五子棋AI对战的完整数据，并提炼出关键的战术、策略要点和改进建议。
+Analyze the previous round data and suggest improvements for gpt-4o_ai.
 
-## 1. 对战报告总览（CSV格式）
-
-这是所有AI选手的胜负统计和性能数据：
+## Tournament Stats
 
 """
     
     if data_summary.get("csv_report"):
         prompt += f"```csv\n{data_summary['csv_report']}\n```\n\n"
     
-    prompt += """## 2. 完整对局历史记录
-
-以下是本轮所有对局的详细历史记录（包含每一步落子、游戏状态等）：
+    prompt += """## Game History
 
 """
     
     if data_summary.get("history_data"):
-        # 将完整的历史数据转为JSON字符串
         history_json = json.dumps(data_summary['history_data'], indent=2, ensure_ascii=False)
         prompt += f"```json\n{history_json}\n```\n\n"
     
-    prompt += """## 3. 上一轮各AI的代码实现
-
-以下是上一轮所有AI选手的代码实现（包含策略逻辑、算法实现等）：
+    prompt += """## AI Code Implementations
 
 """
     
     if data_summary.get("ai_codes"):
         for ai_name, code_files in data_summary["ai_codes"].items():
-            prompt += f"\n### AI: {ai_name}\n\n"
+            prompt += f"\n### {ai_name}\n\n"
             for file_path, content in code_files.items():
-                prompt += f"#### 文件: {file_path}\n"
-                prompt += f"```python\n{content}\n```\n\n"
+                prompt += f"**{file_path}**:\n```python\n{content}\n```\n\n"
     
-    prompt += """## 分析要求
+    prompt += """## Analysis Task
 
-请从以下几个维度进行分析并输出JSON格式的结构化总结：
+Focus on **gpt-4o_ai** performance:
 
-1. **胜负统计分析**
-   - 各AI的胜率、平局率、失败率
-   - 超时次数和平均思考时间
-   - 表现最好和最差的AI
+1. **What went wrong?** (bugs, weak strategies, timeouts)
+2. **Why did opponents win?** (key tactics from winning AIs)
+3. **How to improve?** (concrete code fixes and algorithm enhancements)
 
-2. **战术模式识别**
-   - 常见的开局模式
-   - 成功的进攻策略
-   - 有效的防守模式
-   - 致命的失误类型
-
-3. **代码实现分析**
-   - 胜率高的AI使用了什么算法？（如Minimax、Alpha-Beta剪枝、启发式评估等）
-   - 优秀的代码设计模式和技巧
-   - 代码中的性能优化方法
-   - 值得学习的代码片段
-
-4. **策略优缺点**
-   - 胜率高的AI使用了哪些策略？
-   - 失败的AI有哪些明显的弱点？
-   - 什么样的策略组合更有效？
-
-5. **改进建议**
-   - 针对开局阶段的建议
-   - 针对中盘阶段的建议
-   - 针对残局阶段的建议
-   - 性能优化建议（思考时间控制）
-
-6. **关键洞察**
-   - 从对局历史中发现的规律
-   - 值得学习的优秀案例
-   - 需要避免的错误案例
-   - 从优秀代码中学到的技巧
-
-请以JSON格式输出，结构如下：
-```json
-{
-  "performance_analysis": {
-    "best_performers": [],
-    "worst_performers": [],
-    "timeout_issues": []
-  },
-  "tactical_patterns": {
-    "opening_strategies": [],
-    "attack_patterns": [],
-    "defense_patterns": [],
-    "common_mistakes": []
-  },
-  "code_analysis": {
-    "winning_algorithms": [],
-    "good_design_patterns": [],
-    "performance_optimizations": [],
-    "code_snippets_to_learn": []
-  },
-  "strategy_insights": {
-    "winning_strategies": [],
-    "losing_strategies": [],
-    "effective_combinations": []
-  },
-  "improvement_suggestions": {
-    "opening_phase": [],
-    "middle_phase": [],
-    "endgame_phase": [],
-    "performance_optimization": []
-  },
-  "key_insights": {
-    "patterns_discovered": [],
-    "good_examples": [],
-    "bad_examples": [],
-    "code_techniques": []
-  }
-}
-```
+Be specific and actionable. Focus on implementation details.
 """
     
     return prompt
@@ -329,32 +253,26 @@ def summarize_with_llm(csv_path, history_path, code_dir, api_url, api_key, model
         print("  - LLM分析失败，返回空总结")
         return None
     
-    # 4. 解析LLM响应
+    # 4. 直接保存LLM响应文本（不解析JSON）
     try:
-        # 尝试从响应中提取JSON
-        # LLM可能会在JSON前后添加说明文字，需要提取
-        import re
-        json_match = re.search(r'\{.*\}', llm_response, re.DOTALL)
-        if json_match:
-            summary_data = json.loads(json_match.group())
-        else:
-            # 如果没有找到JSON，将整个响应作为文本保存
-            summary_data = {
-                "raw_analysis": llm_response,
-                "note": "LLM未返回JSON格式，这是原始分析文本"
-            }
+        # LLM返回的是自然语言分析，直接作为raw_analysis保存
+        summary_data = {
+            "raw_analysis": llm_response,
+            "note": "LLM strategy analysis in natural language"
+        }
         
         # 保存总结
         with open(summary_output_path, 'w', encoding='utf-8') as f:
             json.dump(summary_data, f, ensure_ascii=False, indent=2)
         
         print(f"\n[SUCCESS] LLM分析完成！总结已保存到: {summary_output_path}")
+        print(f"  - 分析长度: {len(llm_response)} 字符")
         print("=" * 60)
         
         return summary_data
         
     except Exception as e:
-        print(f"  - 解析LLM响应失败: {e}")
+        print(f"  - 保存LLM响应失败: {e}")
         # 保存原始响应以供调试
         raw_output_path = summary_output_path.replace('.json', '_raw.txt')
         with open(raw_output_path, 'w', encoding='utf-8') as f:
@@ -364,56 +282,75 @@ def summarize_with_llm(csv_path, history_path, code_dir, api_url, api_key, model
 
 
 # 构建基础提示词
-prompt_data = f'''
-# Game Development
-There is a game project under {game_env_path}. You need to read its source code and develop a game AI. Your AI will compete against other AIs in a tournament, so please make your AI as strategic and competitive as possible.
+# 注意: ChatPromptWithLlm.py 只在 Round 2+ 被调用 (当 use_llm_summary=true 时)
+# Round 1 始终使用 ChatPrompt.py
+if round_num == 1:
+    raise ValueError("ChatPromptWithLlm.py should not be called for Round 1. Use ChatPrompt.py instead.")
 
-The final AI should be provided as an HTTP service. You can refer to the guides in {game_env_path}/README.md and {game_env_path}/develop_instruction.md for development instructions.
-*The content in {game_env_path}/develop_instruction.md is very important, please read it carefully!*
+# Round 2+: 基于上一轮优化策略
+# 先占位，后面会插入LLM分析
+prompt_header = f'''
+# Round {round_num}: Improve Your Gomoku AI Strategy
 
-Please develop your AI service directly under {dir_path}. 
+##YOUR MISSION: 
+**You MUST call `edit_file` to improve `{dir_path}/ai_service.py` based on the expert analysis below.**
 
-## Expected File Structure
-Your final file structure should look like this (NO subdirectories):
+'''
+
+prompt_footer = f'''
+
+##ACTION STEPS:
+
+**STEP 1**: Read your current strategy
+```python
+read_text_file('{last_round_dir}/ai_service.py')
 ```
-{dir_path}/
-├── ai_service.py       # Your main AI service file (MUST accept --port argument)
-├── start_ai.sh         # Startup script
-└── requirements.txt    # (Optional) Python dependencies
+
+**STEP 2**: Analyze the problems identified above
+
+**STEP 3**: Call `edit_file` NOW to implement improvements
+```python
+edit_file('{dir_path}/ai_service.py', {{
+  "oldText": "...exact code from current strategy...",
+  "newText": "...improved code based on analysis..."
+}})
 ```
 
-**CRITICAL**: Your `ai_service.py` MUST accept a `--port` command-line argument. It will be started with:
-```bash
-python ai_service.py --port <port_number>
+##CRITICAL REQUIREMENTS:
+- You MUST call `edit_file` - don't just read files and stop
+- Focus on the specific issues mentioned in the analysis
+- Improve threat detection, pattern recognition, and position scoring
+- Keep correct indentation (4 spaces per level)
+- Use existing helper functions (don't create new ones)
+
+## 💡 Key Improvements to Make:
+1. **Threat Detection**: Detect opponent's 4-in-a-row threats earlier
+2. **Pattern Recognition**: Recognize live-3, live-4 patterns
+3. **Position Scoring**: Better weight attack vs defense
+4. **Strategic Depth**: Don't just count consecutive stones, evaluate board control
+
+## 🛠️ TOOL USAGE TIP:
+Use `replace_python_method` instead of `edit_file` for safer editing.
+It automatically handles indentation for you!
+
+Example:
+```python
+replace_python_method(
+    path='{dir_path}/ai_service.py',
+    class_name='GomokuAI',
+    method_name='select_best_move',
+    new_code=\'\'\'def select_best_move(self, board, my_color, opponent_color):
+    # Your new implementation here
+    # No need to worry about outer indentation
+    pass\'\'\'
+)
 ```
 
-
-## Script Requirements
-Please implement a script to start your AI service, with the name `start_ai.sh` in {dir_path}. The script must accept exactly one argument, which is the port number to run the HTTP service. You should be able to start the AI service on a specified port by running:
-```bash
-bash start_ai.sh <port>
-```
-Your AI service should listen on the given port, and you can check its health status by running:
-```bash
-curl -s http://localhost:<port>/health
-```
-**Note:**  The script should not accept any other arguments except for the port number. Make sure your AI service uses this port for HTTP requests.
-
-
-# Other Requirements
-Use your model name as a prefix in the AI_ID variable inside your code, i.e., AI_ID = "{model_name}_AI".
-**IMPORTANT**: Write all files directly in {dir_path}, do NOT create any subdirectories or folders.
-Develop directly in {dir_path} without repeatedly asking for the next step. Report to me only after you have completed the development.
-
-# Access the main server
-You can play game of {game_env_path} in at {game_server}. You can play the games with your own AI or any other AI to improve your strategy. 
-You can use bash tools to self-play to improve yourself.
-
-# Final Remind
-You should write game-play strategy by yourself, do not use any external game engine or API.
-Do not set venv environment in your dir, just use python3 from bash.
-You should write start_ai.sh in {dir_path} and implement the AI service in {dir_path}. DO NOT MODIFY THE CODE IN {game_env_path}.
+**START NOW - Read the code, then call replace_python_method to improve it!**
 '''.strip()
+
+# 初始化 prompt_data（后面会插入分析内容）
+prompt_data = prompt_header
 
 
 # 处理多轮学习
@@ -447,35 +384,23 @@ if round_num > 1:
         model=llm_model
     )
     
-    # 将LLM总结添加到提示词中
+    # 将LLM总结添加到提示词中（放在最前面，确保Agent先看到分析）
     if llm_summary:
-        prompt_data += f"\n\n# Previous Round Analysis Summary\n\n"
-        prompt_data += f"The previous round (round {round_num - 1}) has been analyzed by an expert AI strategist. "
-        prompt_data += f"Here is the structured summary of key insights and recommendations:\n\n"
-        prompt_data += f"```json\n{json.dumps(llm_summary, indent=2, ensure_ascii=False)}\n```\n\n"
-        prompt_data += f"**Important**: Please carefully study this analysis and incorporate the winning strategies "
-        prompt_data += f"while avoiding the identified mistakes. The improvement suggestions are specifically "
-        prompt_data += f"tailored for different game phases (opening, middle, endgame).\n\n"
-        prompt_data += f"The complete raw data is available at:\n"
-        prompt_data += f"  - Tournament report: {last_round_info}\n"
-        prompt_data += f"  - Detailed history: {last_round_log_dir}\n"
-        prompt_data += f"  - Previous AI code: {last_round_dir}\n\n"
-        prompt_data += f"You may reference the raw data if you need more specific details, "
-        prompt_data += f"but the summary above contains the most critical strategic insights.\n\n"
-        prompt_data += f"**CRITICAL INSTRUCTION**: You MUST now read the previous code from {last_round_dir}, "
-        prompt_data += f"analyze the insights above, and then IMMEDIATELY update the files in {dir_path} with improved strategies. "
-        prompt_data += f"DO NOT ask 'Would you like to proceed?' - directly modify the code using edit_file or write_file tools. "
-        prompt_data += f"Your task is NOT complete until you have written the improved code to {dir_path}.\n"
+        # 如果有raw_analysis字段，直接用原始文本
+        if isinstance(llm_summary, dict) and "raw_analysis" in llm_summary:
+            analysis_text = llm_summary["raw_analysis"]
+        else:
+            # 否则转为JSON
+            analysis_text = json.dumps(llm_summary, indent=2, ensure_ascii=False)
+        
+        # 分析放在最前面
+        prompt_data += f"\n##Expert Analysis from Last Round\n\n{analysis_text}\n"
     else:
-        # 如果LLM分析失败,回退到原始方式
         print("\n[WARNING] LLM分析失败，使用原始数据引用方式...")
-        prompt_data += f"\n\nTournament report of last round is in {last_round_info} and detailed history in {last_round_log_dir}. "
-        prompt_data += f"The historical records json are quite large. Please use tools `start_interactive_shell` and `run_interactive_shell` to analyze the data efficiently. "
-        prompt_data += f"You can use head or tail to pre-view the data, or use python to load this json file.\n"
-        prompt_data += f"\n**CRITICAL INSTRUCTION**: The code of the previous round is stored in: {last_round_dir}. "
-        prompt_data += f"You MUST read the previous code, analyze the tournament results, and then IMMEDIATELY update the files in {dir_path} with improved strategies. "
-        prompt_data += f"DO NOT ask for confirmation - directly modify the code files using edit_file or write_file tools. "
-        prompt_data += f"Your task is NOT complete until you have written the improved code to {dir_path}.\n"
+        prompt_data += f"\n##Tournament Data (Analyze This)\n- Report: {last_round_info}\n- History: {last_round_log_dir}\n- Previous code: {last_round_dir}\n"
+    
+    # 添加执行指令（footer）
+    prompt_data += prompt_footer
 
 # 添加语言要求
 if language:
