@@ -223,6 +223,9 @@ class AgentValidator:
         
         print(f"📊 将测试 {len(test_versions)} 个版本: {test_versions}")
         
+        # 检查代码变化
+        self._check_code_changes(test_versions)
+        
         if len(test_versions) < 2:
             print("⚠️  至少需要 2 个版本才能对战")
             return {"error": "版本数量不足"}
@@ -259,6 +262,61 @@ class AgentValidator:
         self._save_report(report)
         
         return report
+
+    def _check_code_changes(self, versions: List[int]):
+        """检查不同版本的代码行数变化"""
+        print("\n" + "=" * 80)
+        print("代码变化检查")
+        print("=" * 80)
+        
+        version_info = []
+        
+        for v in versions:
+            agent_dir = self.base_dir / "AI_competitors" / self.game / self.agent_name / f"v{v}"
+            py_files = [f for f in agent_dir.glob("*.py") if f.name != '__init__.py']
+            
+            if not py_files:
+                version_info.append((v, 0, "No file"))
+                continue
+            
+            target_file = py_files[0]
+            try:
+                with open(target_file, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    line_count = len(lines)
+                    version_info.append((v, line_count, target_file.name))
+            except Exception as e:
+                version_info.append((v, -1, str(e)))
+
+        print(f"{'版本':<10} {'文件名':<30} {'行数':<10} {'变化':<10}")
+        print("-" * 60)
+        
+        prev_count = None
+        for v, count, name in version_info:
+            change = "-"
+            if prev_count is not None and count != -1 and prev_count != -1:
+                diff = count - prev_count
+                if diff > 0:
+                    change = f"+{diff}"
+                elif diff < 0:
+                    change = f"{diff}"
+                else:
+                    change = "0"
+            
+            print(f"v{v:<9} {name:<30} {count:<10} {change:<10}")
+            prev_count = count
+            
+        unchanged = []
+        for i in range(1, len(version_info)):
+            curr_v, curr_count, _ = version_info[i]
+            prev_v, prev_count, _ = version_info[i-1]
+            if curr_count == prev_count and curr_count > 0:
+                unchanged.append(f"v{curr_v}")
+        
+        if unchanged:
+            print(f"\n⚠️  警告: 以下版本代码行数与上一版本相同，可能未修改代码: {', '.join(unchanged)}")
+        else:
+            print("\n✅ 代码行数均有变化")
     
     def _generate_matches(self, versions: List[int]) -> List[Tuple[int, int]]:
         """生成对战配对（所有版本两两对战）"""

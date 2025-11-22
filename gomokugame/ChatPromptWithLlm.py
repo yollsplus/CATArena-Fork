@@ -127,7 +127,31 @@ def analyze_tournament_data(csv_path, history_path, code_dir):
     try:
         if os.path.exists(code_dir):
             print(f"  - 扫描代码目录: {code_dir}")
-            # 遍历code_dir下的所有AI目录
+            
+            # 1. 检查是否是扁平结构（直接包含代码文件，如 AI_develop）
+            # 获取目录下所有的 .py 和 .sh 文件
+            root_code_files = [f for f in os.listdir(code_dir) 
+                              if os.path.isfile(os.path.join(code_dir, f)) and f.endswith(('.py', '.sh'))]
+            
+            if root_code_files:
+                print(f"    检测到扁平结构，发现 {len(root_code_files)} 个代码文件")
+                ai_name = "gpt-4o_ai" # 默认作为当前正在开发的AI
+                ai_code_files = {}
+                
+                for file in root_code_files:
+                    file_path = os.path.join(code_dir, file)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                            if len(content) < 50000:  # 50KB限制
+                                ai_code_files[file] = content
+                    except Exception as e:
+                        print(f"    警告: 无法读取 {file_path}: {e}")
+                
+                if ai_code_files:
+                    data_summary["ai_codes"][ai_name] = ai_code_files
+
+            # 2. 遍历子目录 (兼容 AI_competitors 这种多AI嵌套结构)
             for ai_name in os.listdir(code_dir):
                 ai_path = os.path.join(code_dir, ai_name)
                 if os.path.isdir(ai_path):
@@ -200,13 +224,28 @@ Analyze the previous round data and suggest improvements for gpt-4o_ai.
     
     prompt += """## Analysis Task
 
-Focus on **gpt-4o_ai** performance:
+You are a Code Reviewer for the **gpt-4o_ai** project.
+Your goal is to guide the developer (Agent) on how to refactor the code to win.
 
-1. **What went wrong?** (bugs, weak strategies, timeouts)
-2. **Why did opponents win?** (key tactics from winning AIs)
-3. **How to improve?** (concrete code fixes and algorithm enhancements)
+**DO NOT write the full code implementation.**
+**DO NOT focus only on high-level tactics (like "play aggressively").**
 
-Be specific and actionable. Focus on implementation details.
+Instead, analyze the **gpt-4o_ai** source code provided above and point out specific logical flaws or missing features that caused the losses.
+
+Please structure your analysis as follows:
+
+1. **Codebase Diagnosis**:
+   - Identify which specific functions or logic blocks in `gpt-4o_ai` are responsible for the poor performance.
+   - Example: "The `score_position` function fails to detect broken-4 patterns because the regex `11011` is missing."
+   - Example: "The search depth in `minimax` is hardcoded to 1, which is insufficient."
+
+2. **Architectural Suggestions**:
+   - Suggest specific algorithmic improvements (e.g., "Implement Alpha-Beta pruning", "Add Zobrist hashing").
+   - Explain *how* these changes should be integrated into the existing class structure.
+
+3. **Prioritized Refactoring Plan**:
+   - List 3 concrete coding tasks for the Agent to perform in the next iteration.
+   - Example: "1. Modify `evaluate_board` to increase weight for opponent's open-3."
 """
     
     return prompt
@@ -323,11 +362,36 @@ edit_file('{dir_path}/ai_service.py', {{
 - Keep correct indentation (4 spaces per level)
 - Use existing helper functions (don't create new ones)
 
-## 💡 Key Improvements to Make:
-1. **Threat Detection**: Detect opponent's 4-in-a-row threats earlier
-2. **Pattern Recognition**: Recognize live-3, live-4 patterns
-3. **Position Scoring**: Better weight attack vs defense
-4. **Strategic Depth**: Don't just count consecutive stones, evaluate board control
+## ⛔ COMMON MISTAKES TO AVOID (READ CAREFULLY)
+
+1.  **Calling Undefined Functions**:
+    - **ERROR**: `if self._detect_pattern(...)` (when `_detect_pattern` is NOT defined in the class).
+    - **FIX**: You MUST define any helper function you use.
+    - **HOW**: Since `replace_python_method` only replaces ONE method, you should define helper functions **inside** `select_best_move` as nested functions.
+    - **Example**:
+      ```python
+      def select_best_move(self, board, ...):
+          def _my_helper(x, y):  # Define it HERE
+              return ...
+          
+          # Now you can use it
+          val = _my_helper(1, 2)
+      ```
+
+2.  **Unreachable Code (Early Return)**:
+    - **ERROR**:
+      ```python
+      if best_move:
+          return best_move  # <--- RETURNS HERE
+      
+      # Minimax code below is NEVER REACHED!
+      def minimax(...): ...
+      ```
+    - **FIX**: Remove the early return if you want to run further logic (like Minimax). Only return when you have the FINAL result.
+
+3.  **Syntax Errors**:
+    - Ensure all parentheses are closed.
+    - Ensure indentation is consistent (4 spaces).
 
 ## 🛠️ TOOL USAGE TIP:
 Use `replace_python_method` instead of `edit_file` for safer editing.
@@ -340,9 +404,13 @@ replace_python_method(
     class_name='GomokuAI',
     method_name='select_best_move',
     new_code=\'\'\'def select_best_move(self, board, my_color, opponent_color):
-    # Your new implementation here
-    # No need to worry about outer indentation
-    pass\'\'\'
+    # Define helpers inside
+    def evaluate(x, y):
+        return 0
+        
+    # Your logic
+    # ...
+    return best_move\'\'\'
 )
 ```
 

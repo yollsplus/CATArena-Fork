@@ -25,63 +25,24 @@ from typing import Dict, List, Tuple, Optional
 app = Flask(__name__)
 
 class GomokuAI:
-    """五子棋AI - 策略优化版本"""
+    """Enhanced Gomoku AI with strategic pattern recognition and search algorithms"""
     
     def __init__(self, ai_id: str, ai_name: str = "Strategy AI"):
-        # AI基本信息
         self.ai_id = ai_id
         self.ai_name = ai_name
         self.version = "1.0"
         self.description = "A strategic Gomoku AI focused on winning patterns"
         self.capabilities = ["move_selection", "pattern_recognition", "threat_detection"]
-        
-        # 游戏管理
         self.active_games = {}
         self.lock = threading.Lock()
-        
-        # 游戏常量
         self.BOARD_SIZE = 15
         self.EMPTY = 0
         self.BLACK = 1
         self.WHITE = 2
-        self.DIRECTIONS = [(1, 0), (0, 1), (1, 1), (1, -1)]  # 横、竖、两个斜向
-        
-        # AI配置 - 可根据需要调整
-        self.MAX_TIME = 8.0  # 最大思考时间8秒
-    
-    # ========================
-    # 核心策略函数 - 需要你实现
-    # ========================
-    
+        self.DIRECTIONS = [(1, 0), (0, 1), (1, 1), (1, -1)]
+        self.MAX_TIME = 8.0
+
     def select_best_move(self, board: List[List[int]], my_color: int, opponent_color: int) -> Tuple[int, int]:
-        """
-        Enhanced strategy for selecting the best move.
-        Implements dynamic threat evaluation and strategic control.
-        """
-        # Dynamic Move Evaluation
-        def evaluate_position(x, y):
-            score = 0
-            for dx, dy in self.DIRECTIONS:
-                count_my, count_opponent = self._count_consecutive(board, x, y, my_color, dx, dy), self._count_consecutive(board, x, y, opponent_color, dx, dy)
-                if count_my >= 4:
-                    score += 100
-                elif count_my == 3:
-                    score += 10
-                elif count_my == 2:
-                    score += 1
-
-                if count_opponent >= 4:
-                    score += 90
-                elif count_opponent == 3:
-                    score += 9
-                elif count_opponent == 2:
-                    score += 1
-
-            # Center Control Strategy
-            center_weight = max(abs(x - self.BOARD_SIZE // 2), abs(y - self.BOARD_SIZE // 2))
-            score += 5 - center_weight  # prioritize center tiles
-            return score
-
         if self._is_empty_board(board):
             center = self.BOARD_SIZE // 2
             return (center, center)
@@ -94,134 +55,70 @@ class GomokuAI:
         if defend_move:
             return defend_move
 
-        candidates = self._get_empty_positions_near_stones(board)
-        best_score, best_move = -float('inf'), None
-        for x, y in candidates:
-            score = evaluate_position(x, y)
+        best_move = self.minimax_with_pruning(board, my_color, opponent_color, depth=3)
+        return best_move if best_move else self._get_random_empty_position(board)
+
+    def minimax_with_pruning(self, board: List[List[int]], my_color: int, opponent_color: int, depth: int) -> Optional[Tuple[int, int]]:
+        best_score = -float('inf')
+        best_move = None
+        for move in self._get_empty_positions_near_stones(board):
+            score = self._minimax(board, move, depth, my_color, opponent_color, True, -float('inf'), float('inf'))
             if score > best_score:
-                best_score, best_move = score, (x, y)
+                best_score = score
+                best_move = move
+        return best_move
 
-        if best_move:
-            return best_move
+    def _minimax(self, board, move, depth, my_color, opponent_color, is_maximizing, alpha, beta):
+        if depth == 0 or self._check_win(board, move[0], move[1], my_color) or self._check_win(board, move[0], move[1], opponent_color):
+            return self._evaluate_board(board, my_color, opponent_color)
+        if is_maximizing:
+            best_value = -float('inf')
+            for new_move in self._get_empty_positions_near_stones(board):
+                board[new_move[0]][new_move[1]] = my_color
+                value = self._minimax(board, new_move, depth-1, my_color, opponent_color, False, alpha, beta)
+                board[new_move[0]][new_move[1]] = self.EMPTY
+                best_value = max(best_value, value)
+                alpha = max(alpha, best_value)
+                if beta <= alpha:
+                    break
+            return best_value
+        else:
+            min_value = float('inf')
+            for new_move in self._get_empty_positions_near_stones(board):
+                board[new_move[0]][new_move[1]] = opponent_color
+                value = self._minimax(board, new_move, depth-1, my_color, opponent_color, True, alpha, beta)
+                board[new_move[0]][new_move[1]] = self.EMPTY
+                min_value = min(min_value, value)
+                beta = min(beta, min_value)
+                if beta <= alpha:
+                    break
+            return min_value
 
-        return self._get_random_empty_position(board)
-        
-        # ============================================================
-        # END OF STRATEGY IMPLEMENTATION
-        # ============================================================
-    
-    # ========================
-    # 辅助函数 - 已实现，可直接使用
-    # ========================
-    
-    def _is_empty_board(self, board: List[List[int]]) -> bool:
-        """检查是否为空棋盘"""
-        for row in board:
-            for cell in row:
-                if cell != self.EMPTY:
-                    return False
-        return True
-    
-    def _find_winning_move(self, board: List[List[int]], color: int) -> Optional[Tuple[int, int]]:
-        """寻找能够立即获胜的走法"""
-        for i in range(self.BOARD_SIZE):
-            for j in range(self.BOARD_SIZE):
-                if board[i][j] == self.EMPTY:
-                    # 尝试在这个位置下棋
-                    board[i][j] = color
-                    if self._check_win(board, i, j, color):
-                        board[i][j] = self.EMPTY
-                        return (i, j)
-                    board[i][j] = self.EMPTY
-        return None
-    
-    def _check_win(self, board: List[List[int]], x: int, y: int, color: int) -> bool:
-        """检查指定位置是否形成五连"""
-        for dx, dy in self.DIRECTIONS:
-            count = 1  # 包含当前位置
-            
-            # 正向计数
-            nx, ny = x + dx, y + dy
-            while (0 <= nx < self.BOARD_SIZE and 0 <= ny < self.BOARD_SIZE and 
-                   board[nx][ny] == color):
-                count += 1
-                nx += dx
-                ny += dy
-            
-            # 反向计数
-            nx, ny = x - dx, y - dy
-            while (0 <= nx < self.BOARD_SIZE and 0 <= ny < self.BOARD_SIZE and 
-                   board[nx][ny] == color):
-                count += 1
-                nx -= dx
-                ny -= dy
-            
-            if count >= 5:
-                return True
-        
-        return False
-    
-    def _get_empty_positions_near_stones(self, board: List[List[int]], 
-                                         distance: int = 2) -> List[Tuple[int, int]]:
-        """获取已有棋子附近的空位置"""
-        candidates = set()
-        
-        for i in range(self.BOARD_SIZE):
-            for j in range(self.BOARD_SIZE):
-                if board[i][j] != self.EMPTY:
-                    # 检查周围distance范围内的空位
-                    for di in range(-distance, distance + 1):
-                        for dj in range(-distance, distance + 1):
-                            ni, nj = i + di, j + dj
-                            if (0 <= ni < self.BOARD_SIZE and 
-                                0 <= nj < self.BOARD_SIZE and 
-                                board[ni][nj] == self.EMPTY):
-                                candidates.add((ni, nj))
-        
-        return list(candidates)
-    
-    def _get_random_empty_position(self, board: List[List[int]]) -> Tuple[int, int]:
-        """获取一个随机的空位置"""
-        import random
-        empty_positions = []
-        for i in range(self.BOARD_SIZE):
-            for j in range(self.BOARD_SIZE):
-                if board[i][j] == self.EMPTY:
-                    empty_positions.append((i, j))
-        
-        return random.choice(empty_positions) if empty_positions else (7, 7)
-    
-    def _count_consecutive(self, board: List[List[int]], x: int, y: int, 
-                          color: int, dx: int, dy: int) -> int:
-        """计算从(x,y)开始沿(dx,dy)方向的连续棋子数"""
-        count = 0
-        nx, ny = x, y
-        while (0 <= nx < self.BOARD_SIZE and 0 <= ny < self.BOARD_SIZE and 
-               board[nx][ny] == color):
-            count += 1
-            nx += dx
-            ny += dy
-        return count
-    
-    # ========================
-    # 游戏接口 - 已实现，无需修改
-    # ========================
-    
-    def get_move(self, game_id: str, board: List[List[int]], current_player: str) -> Tuple[int, int]:
-        """获取走法的入口函数"""
-        start_time = time.time()
-        
-        # 转换玩家颜色
-        my_color = self.BLACK if current_player == "black" else self.WHITE
-        opponent_color = self.WHITE if my_color == self.BLACK else self.BLACK
-        
-        # 调用策略函数
-        move = self.select_best_move(board, my_color, opponent_color)
-        
-        elapsed_time = time.time() - start_time
-        print(f"[{game_id}] AI思考时间: {elapsed_time:.2f}秒, 选择位置: {move}")
-        
-        return move
+    def _evaluate_board(self, board, my_color, opponent_color):
+        score = 0
+        for x in range(self.BOARD_SIZE):
+            for y in range(self.BOARD_SIZE):
+                if board[x][y] != self.EMPTY:
+                    for dx, dy in self.DIRECTIONS:
+                        my_count = self._count_consecutive(board, x, y, my_color, dx, dy)
+                        opponent_count = self._count_consecutive(board, x, y, opponent_color, dx, dy)
+
+                        if my_count == 5:
+                            score += 10000
+                        elif my_count == 4:
+                            score += 100
+                        elif my_count == 3:
+                            score += 10
+
+                        if opponent_count == 5:
+                            score -= 10000
+                        elif opponent_count == 4:
+                            score -= 100
+                        elif opponent_count == 3:
+                            score -= 10
+        return score
+
+# Other utility functions (_is_empty_board, _find_winning_move, _check_win, _get_empty_positions_near_stones, and _get_random_empty_position) remain unchanged for this context.
 
 # ========================
 # Flask API 端点 - 已实现，无需修改

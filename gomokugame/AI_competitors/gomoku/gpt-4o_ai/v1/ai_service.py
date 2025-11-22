@@ -88,57 +88,48 @@ class GomokuAI:
             return defend_move
         
         # ============================================================
-        # STRATEGY IMPLEMENTATION
+        # Improved strategy implementation for selecting the best move
         # ============================================================
-        # Evaluate and score each candidate position
+
         candidates = self._get_empty_positions_near_stones(board)
-        best_score = -float('inf')
+        best_score = -1
         best_move = None
-        
-        for x, y in candidates:
+
+        for candidate in candidates:
+            x, y = candidate
             score = 0
-            # Count consecutive stones that form potential winning lines
+            
+            # Evaluate defensive move block opponent's consecutive patterns
             for dx, dy in self.DIRECTIONS:
-                count_my = self._count_consecutive(board, x, y, my_color, dx, dy)
-                count_opponent = self._count_consecutive(board, x, y, opponent_color, dx, dy)
+                opponent_count = self._count_consecutive(board, x, y, opponent_color, dx, dy)
+                my_count = self._count_consecutive(board, x, y, my_color, dx, dy)
                 
-                # Evaluate this position's potential for my color
-                if count_my >= 4:
-                    score += 100  # Winning move
-                elif count_my == 3:
-                    score += 10  # Live three
-                elif count_my == 2:
-                    score += 1  # Live two
+                if opponent_count >= 4:  # Block opponent's winning move immediately
+                    score += 100
+                elif opponent_count == 3:  # Block opponent from forming "live four"
+                    score += 50
                 
-                # Evaluate blocking opponent's potential
-                if count_opponent >= 4:
-                    score += 90  # Block opponent's winning move
-                elif count_opponent == 3:
-                    score += 9  # Block opponent's live three
-                elif count_opponent == 2:
-                    score += 1  # Block opponent's live two
-                
-            # Find the move with the best score
+                # Evaluate offensive move to create consecutive patterns
+                if my_count == 4:  # Create a winning pattern
+                    score += 100
+                elif my_count == 3:  # Create "live four"
+                    score += 20
+
+            # Additional strategic scoring can be applied here
             if score > best_score:
                 best_score = score
-                best_move = (x, y)
-        
+                best_move = candidate
+
+        # Return the best move based on evaluation
         if best_move:
             return best_move
-        
+
+        # Fallback: return a random empty position if no strategic candidates found
         return self._get_random_empty_position(board)
+
         # ============================================================
         # END OF STRATEGY IMPLEMENTATION
         # ============================================================
-        
-        candidates = self._get_empty_positions_near_stones(board)
-        if candidates:
-            # TODO: Replace this with your evaluation logic
-            # Example: score each candidate and return the best one
-            return candidates[0]
-        
-        # Fallback: random empty position
-        return self._get_random_empty_position(board)
         
         # ============================================================
         # END OF STRATEGY IMPLEMENTATION
