@@ -183,6 +183,7 @@ class AutoIterationManager:
         self.base_dir = Path(__file__).parent
         self.current_round = 1
         self.iteration_log = []
+        self.chat_history = []  # 存储对话历史，实现多轮对话上下文保持
         
         # 创建输出目录
         self.output_dir = self.base_dir / "auto_iteration_output"
@@ -233,8 +234,8 @@ class AutoIterationManager:
                 # Step 2: 保存提示词到文件
                 prompt_file = self._save_prompt(prompt, round_num)
                 
-                # Step 3: 发送提示词给Agent
-                agent_response = self._send_to_agent(prompt, round_num)
+                # Step 3: 发送提示词给Agent (带语法检查循环)
+                agent_response = self._send_to_agent_with_validation(prompt, round_num)
                 
                 # Step 4: 保存Agent响应
                 self._save_agent_response(agent_response, round_num)
@@ -323,7 +324,8 @@ class AutoIterationManager:
                     '--last_round_dir', str(prev_round_dir),
                     '--llm_api_url', llm_config['api_url'],
                     '--llm_api_key', llm_config['api_key'],
-                    '--llm_model', llm_config['model']
+                    '--llm_model', llm_config['model'],
+                    '--concise'  # 使用简洁模式，只输出分析内容
                 ]
             else:
                 cmd = [
@@ -363,6 +365,18 @@ class AutoIterationManager:
             print(f"错误输出: {result.stderr}")
             return ""
         
+        # 清理 ChatPromptWithLlm.py 的日志输出
+        if "最终提示词:" in prompt:
+            parts = prompt.split("最终提示词:")
+            if len(parts) > 1:
+                # 取最后一部分
+                raw_prompt = parts[-1]
+                # 去除分隔符（如果有）
+                lines = raw_prompt.splitlines()
+                # 过滤掉全是等号的行
+                clean_lines = [line for line in lines if not line.strip().startswith("======")]
+                prompt = "\n".join(clean_lines).strip()
+        
         print(f"✅ 提示词已生成 ({len(prompt)} 字符)")
         
         return prompt
@@ -387,6 +401,187 @@ class AutoIterationManager:
         print(f"✅ 提示词已保存到: {prompt_file}")
         return prompt_file
     
+    def _send_to_agent_with_validation(self, initial_prompt: str, round_num: int) -> Dict[str, Any]:
+        """
+        发送提示词给Agent，并进行代码语法检查循环
+        
+        Args:
+            initial_prompt: 初始提示词
+            round_num: 轮次
+            
+        Returns:
+            Agent的最终响应
+        """
+        max_retries = 3
+        current_prompt = initial_prompt
+        last_response = {}
+        
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                print(f"\n[3/6] 🔄 修复尝试 {attempt}/{max_retries}...")
+            
+            # 发送请求
+            last_response = self._send_to_agent(current_prompt, round_num)
+            
+            # 检查语法
+            ai_develop_dir = self.base_dir / "gomoku" / "AI_develop"
+            syntax_error = self._check_code_syntax(ai_develop_dir)
+            
+            if syntax_error:
+                print(f"⚠️  检测到语法错误 (尝试 {attempt + 1}/{max_retries + 1}):")
+                print(f"   {syntax_error}")
+                
+                if attempt < max_retries:
+                    # 构建修复提示词
+                    current_prompt = (
+                        f"The code you modified has syntax errors. Please fix them immediately.\n\n"
+                        f"Error details:\n{syntax_error}\n\n"
+                        f"Use `edit_file` or `replace_python_method` to fix the code."
+                    )
+                    continue
+                else:
+                    print("❌ 达到最大修复次数，放弃修复，继续执行...")
+                    return last_response
+
+            # 语法检查通过，进行运行时检查
+            runtime_error = self._check_code_runtime(ai_develop_dir)
+            
+            if not runtime_error:
+                if attempt > 0:
+                    print("✅ 修复成功！")
+                return last_response
+            
+            print(f"⚠️  检测到运行时错误 (尝试 {attempt + 1}/{max_retries + 1}):")
+            print(f"   {runtime_error}")
+            
+            if attempt < max_retries:
+                # 构建修复提示词
+                current_prompt = (
+                    f"The code you modified has no syntax errors, but it failed to run validation tests.\n"
+                    f"This usually means there are runtime errors like NameError, ImportError, or logic errors in your strategy.\n\n"
+                    f"Runtime Error details:\n{runtime_error}\n\n"
+                    f"Please fix the runtime error immediately."
+                )
+            else:
+                print("❌ 达到最大修复次数，放弃修复，继续执行...")
+        
+        return last_response
+
+    def _check_code_runtime(self, directory: Path) -> Optional[str]:
+        """
+        检查代码是否能正常运行并响应请求
+        
+        Args:
+            directory: 代码目录
+            
+        Returns:
+            错误信息字符串，如果没有错误则返回 None
+        """
+        print("   正在进行运行时验证...")
+        
+        # 找到 Python 文件
+        py_files = list(directory.glob("*.py"))
+        if not py_files:
+            return "No Python files found"
+        
+        # 假设第一个是主文件，或者找 ai_service.py
+        main_file = next((f for f in py_files if f.name == 'ai_service.py'), py_files[0])
+        
+        test_port = 19999 # 使用一个测试端口
+        
+        # 启动进程
+        import subprocess
+        import sys
+        import time
+        import requests
+        import signal
+        
+        cmd = [sys.executable, str(main_file.name), '--port', str(test_port)]
+        
+        proc = None
+        try:
+            # 启动服务
+            proc = subprocess.Popen(
+                cmd,
+                cwd=directory,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
+            )
+            
+            # 等待启动 (最多 5 秒)
+            start_time = time.time()
+            server_ready = False
+            while time.time() - start_time < 5:
+                if proc.poll() is not None:
+                    # 进程已退出
+                    break
+                try:
+                    requests.get(f"http://localhost:{test_port}/health", timeout=1)
+                    server_ready = True
+                    break
+                except:
+                    time.sleep(0.5)
+            
+            if not server_ready:
+                # 获取 stderr
+                _, stderr = proc.communicate(timeout=1)
+                return f"Service failed to start or health check failed.\nStderr: {stderr}"
+            
+            # 发送测试请求 (模拟 get_move)
+            # 构造一个简单的空棋盘
+            payload = {
+                "game_id": "validation_test",
+                "board": [[0] * 15 for _ in range(15)],
+                "current_player": "black"
+            }
+            
+            resp = requests.post(f"http://localhost:{test_port}/get_move", json=payload, timeout=5)
+            if resp.status_code != 200:
+                return f"Service returned error status: {resp.status_code}\nResponse: {resp.text}"
+            
+            # 验证通过
+            return None
+            
+        except Exception as e:
+            return f"Runtime validation exception: {str(e)}"
+        finally:
+            # 清理进程
+            if proc and proc.poll() is None:
+                if sys.platform == 'win32':
+                    # Windows: 发送 CTRL_BREAK_EVENT
+                    proc.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    proc.terminate()
+                try:
+                    proc.wait(timeout=2)
+                except:
+                    proc.kill()
+
+    def _check_code_syntax(self, directory: Path) -> Optional[str]:
+        """
+        检查目录下 Python 文件的语法
+        
+        Args:
+            directory: 代码目录
+            
+        Returns:
+            错误信息字符串，如果没有错误则返回 None
+        """
+        if not directory.exists():
+            return "Directory not found"
+            
+        py_files = list(directory.glob("*.py"))
+        for py_file in py_files:
+            try:
+                with open(py_file, 'r', encoding='utf-8') as f:
+                    source = f.read()
+                compile(source, str(py_file), 'exec')
+            except Exception as e:
+                return f"File: {py_file.name}\nError: {str(e)}"
+        return None
+
     def _send_to_agent(self, prompt: str, round_num: int) -> Dict[str, Any]:
         """
         发送提示词给Agent
@@ -436,14 +631,21 @@ class AutoIterationManager:
             
             max_iterations = self.config['agent'].get('mcp_max_iterations', 15)
             
+            # 传入当前的对话历史
             result = run_agent_with_mcp_sync(
                 prompt=prompt,
                 api_key=self.config['agent']['api_key'],
                 api_url=self.config['agent'].get('base_url', 'https://api.openai.com/v1'),
                 model=self.config['agent']['model'],
                 workspace_root=self.base_dir,
-                max_iterations=max_iterations
+                max_iterations=max_iterations,
+                history=self.chat_history  # 传入历史
             )
+            
+            # 更新对话历史
+            if 'history' in result:
+                self.chat_history = result['history']
+                print(f"   对话历史已更新，当前长度: {len(self.chat_history)}")
             
             result['timestamp'] = datetime.now().isoformat()
             return result
@@ -454,9 +656,10 @@ class AutoIterationManager:
                 base_url=self.config['agent'].get('base_url')
             )
             
-            response = client.chat.completions.create(
-                model=self.config['agent']['model'],
-                messages=[
+            # 构建消息列表
+            if not self.chat_history:
+                # Round 1: 初始化
+                messages = [
                     {
                         "role": "system",
                         "content": "You are an expert AI programming assistant. Generate complete, production-ready code."
@@ -465,10 +668,26 @@ class AutoIterationManager:
                         "role": "user",
                         "content": prompt
                     }
-                ],
+                ]
+            else:
+                # Round 2+: 追加新消息
+                messages = list(self.chat_history)
+                messages.append({
+                    "role": "user",
+                    "content": prompt
+                })
+            
+            response = client.chat.completions.create(
+                model=self.config['agent']['model'],
+                messages=messages,
                 temperature=0.7,
                 max_tokens=8000
             )
+            
+            # 更新历史
+            messages.append(response.choices[0].message.model_dump())
+            self.chat_history = messages
+            print(f"   对话历史已更新，当前长度: {len(self.chat_history)}")
             
             return {
                 "content": response.choices[0].message.content,
@@ -493,8 +712,12 @@ class AutoIterationManager:
                 api_url='https://api.anthropic.com',  # Anthropic API
                 model=self.config['agent']['model'],
                 workspace_root=self.base_dir,
-                max_iterations=max_iterations
+                max_iterations=max_iterations,
+                history=self.chat_history
             )
+            
+            if 'history' in result:
+                self.chat_history = result['history']
             
             result['timestamp'] = datetime.now().isoformat()
             return result
@@ -504,16 +727,21 @@ class AutoIterationManager:
                 api_key=self.config['agent']['api_key']
             )
             
+            if not self.chat_history:
+                messages = [{"role": "user", "content": prompt}]
+            else:
+                messages = list(self.chat_history)
+                messages.append({"role": "user", "content": prompt})
+            
             response = client.messages.create(
                 model=self.config['agent']['model'],
                 max_tokens=8000,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
+                messages=messages
             )
+            
+            # 更新历史
+            messages.append({"role": "assistant", "content": response.content[0].text})
+            self.chat_history = messages
             
             return {
                 "content": response.content[0].text,

@@ -384,13 +384,14 @@ class MCPAgentRunner:
         
         self.mcp_client = MCPFileSystemClient(workspace_root)
     
-    async def run_agent_with_mcp(self, prompt: str, max_iterations: int = 15) -> Dict[str, Any]:
+    async def run_agent_with_mcp(self, prompt: str, max_iterations: int = 15, history: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """
         运行 Agent，支持 MCP 工具调用
         
         Args:
             prompt: 用户提示词
             max_iterations: 最大工具调用迭代次数
+            history: 对话历史（可选）
             
         Returns:
             Agent 响应结果
@@ -398,17 +399,23 @@ class MCPAgentRunner:
         async with self.mcp_client.connect():
             # 根据 API 类型选择不同的客户端
             if "anthropic" in self.api_url.lower() or self.model.startswith("claude"):
-                return await self._run_with_anthropic(prompt, max_iterations)
+                return await self._run_with_anthropic(prompt, max_iterations, history)
             else:
-                return await self._run_with_openai(prompt, max_iterations)
+                return await self._run_with_openai(prompt, max_iterations, history)
     
-    async def _run_with_openai(self, prompt: str, max_iterations: int) -> Dict[str, Any]:
+    async def _run_with_openai(self, prompt: str, max_iterations: int, history: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """使用 OpenAI API 运行（兼容格式）"""
         from openai import AsyncOpenAI
         
         client = AsyncOpenAI(api_key=self.api_key, base_url=self.api_url)
         
-        messages = [{"role": "user", "content": prompt}]
+        # 初始化消息历史
+        if history:
+            messages = list(history) # 复制一份
+            messages.append({"role": "user", "content": prompt})
+        else:
+            messages = [{"role": "user", "content": prompt}]
+            
         tools = self.mcp_client.get_tools_for_llm()
         
         for iteration in range(max_iterations):
@@ -425,15 +432,18 @@ class MCPAgentRunner:
             
             # 如果没有工具调用，返回结果
             if not message.tool_calls:
+                # 将最终回复添加到历史
+                messages.append(message.model_dump())
                 return {
                     "content": message.content,
                     "model": self.model,
                     "usage": response.usage.model_dump() if response.usage else {},
-                    "iterations": iteration + 1
+                    "iterations": iteration + 1,
+                    "history": messages  # 返回更新后的历史
                 }
             
             # 执行工具调用
-            messages.append(message)
+            messages.append(message.model_dump())
             
             for tool_call in message.tool_calls:
                 tool_name = tool_call.function.name
@@ -456,16 +466,22 @@ class MCPAgentRunner:
             "content": "达到最大工具调用次数",
             "model": self.model,
             "iterations": max_iterations,
-            "warning": "max_iterations_reached"
+            "warning": "max_iterations_reached",
+            "history": messages
         }
     
-    async def _run_with_anthropic(self, prompt: str, max_iterations: int) -> Dict[str, Any]:
+    async def _run_with_anthropic(self, prompt: str, max_iterations: int, history: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """使用 Anthropic Claude API 运行"""
         import anthropic
         
         client = anthropic.AsyncAnthropic(api_key=self.api_key)
         
-        messages = [{"role": "user", "content": prompt}]
+        if history:
+            messages = list(history)
+            messages.append({"role": "user", "content": prompt})
+        else:
+            messages = [{"role": "user", "content": prompt}]
+            
         tools = self._convert_tools_for_anthropic()
         
         for iteration in range(max_iterations):
@@ -487,6 +503,9 @@ class MCPAgentRunner:
                     block.text for block in response.content if block.type == "text"
                 ])
                 
+                # 添加助手回复到历史
+                messages.append({"role": "assistant", "content": response.content})
+                
                 return {
                     "content": text_content,
                     "model": self.model,
@@ -494,7 +513,8 @@ class MCPAgentRunner:
                         "input_tokens": response.usage.input_tokens,
                         "output_tokens": response.usage.output_tokens
                     },
-                    "iterations": iteration + 1
+                    "iterations": iteration + 1,
+                    "history": messages
                 }
             
             # 添加 assistant 消息
@@ -525,7 +545,8 @@ class MCPAgentRunner:
             "content": "达到最大工具调用次数",
             "model": self.model,
             "iterations": max_iterations,
-            "warning": "max_iterations_reached"
+            "warning": "max_iterations_reached",
+            "history": messages
         }
     
     def _convert_tools_for_anthropic(self) -> List[Dict[str, Any]]:
@@ -553,7 +574,8 @@ def run_agent_with_mcp_sync(
     api_url: str,
     model: str,
     workspace_root: Path,
-    max_iterations: int = 15
+    max_iterations: int = 15,
+    history: Optional[List[Dict]] = None
 ) -> Dict[str, Any]:
     """
     同步版本的 Agent 运行器（内部使用 asyncio）
@@ -565,6 +587,7 @@ def run_agent_with_mcp_sync(
         model: 模型名称
         workspace_root: 工作空间根目录
         max_iterations: 最大迭代次数
+        history: 对话历史
         
     Returns:
         Agent 响应结果
@@ -576,7 +599,7 @@ def run_agent_with_mcp_sync(
         loop = asyncio.get_running_loop()
     except RuntimeError:
         # 没有运行中的事件循环，使用 asyncio.run
-        return asyncio.run(runner.run_agent_with_mcp(prompt, max_iterations))
+        return asyncio.run(runner.run_agent_with_mcp(prompt, max_iterations, history))
     else:
         # 已经有运行中的事件循环，在新线程中运行
         import concurrent.futures
@@ -586,7 +609,7 @@ def run_agent_with_mcp_sync(
             new_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(new_loop)
             try:
-                return new_loop.run_until_complete(runner.run_agent_with_mcp(prompt, max_iterations))
+                return new_loop.run_until_complete(runner.run_agent_with_mcp(prompt, max_iterations, history))
             finally:
                 new_loop.close()
         

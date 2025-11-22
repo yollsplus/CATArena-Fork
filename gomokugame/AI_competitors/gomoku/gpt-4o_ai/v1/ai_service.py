@@ -53,83 +53,87 @@ class GomokuAI:
     # 核心策略函数 - 需要你实现
     # ========================
     
-    def select_best_move(self, board: List[List[int]], my_color: int, 
-                        opponent_color: int) -> Tuple[int, int]:
-        """
-        选择最佳走法 - 这是你需要实现的核心策略函数
-        
-        参数:
-            board: 15x15的棋盘，0=空，1=黑，2=白
-            my_color: 我方颜色 (1或2)
-            opponent_color: 对手颜色 (1或2)
-        
-        返回:
-            (row, col): 你选择的走法位置
-        
-        提示:
-            - 优先考虑能立即获胜的走法
-            - 其次考虑防守对手的威胁
-            - 然后考虑建立自己的进攻态势
-            - 可以使用下面提供的辅助函数
-        """
-        # 第一步下中心
-        if self._is_empty_board(board):
-            center = self.BOARD_SIZE // 2
-            return (center, center)
-        
-        # 检查能否立即获胜
+    def select_best_move(self, board: List[List[int]], my_color: int, opponent_color: int) -> Tuple[int, int]:
+        def evaluate_position(x: int, y: int, color: int) -> int:
+            score = 0
+            # Evaluate using consecutive stones and pattern recognition
+            for dx, dy in self.DIRECTIONS:
+                count = self._count_consecutive(board, x, y, color, dx, dy)
+                score += count ** 2  # Score increases quadratically for longer chains
+                # Add extra points for creating double threats
+                if count == 4 and self._check_win(board, x, y, color):
+                    score += 100
+            return score
+
+        def minimax(board: List[List[int]], depth: int, alpha: int, beta: int, 
+                    maximizing: bool) -> Tuple[int, Tuple[int, int]]:
+            nonlocal my_color, opponent_color
+            if depth == 0 or self._is_empty_board(board):
+                max_score = float('-inf')
+                best_move = None
+                for x, y in self._get_empty_positions_near_stones(board):
+                    score = evaluate_position(x, y, my_color if maximizing else opponent_color)
+                    if score > max_score:
+                        max_score = score
+                        best_move = (x, y)
+                return max_score, best_move
+
+            if maximizing:
+                max_eval = float('-inf')
+                best_move = None
+                for x, y in self._get_empty_positions_near_stones(board):
+                    board[x][y] = my_color
+                    eval, _ = minimax(board, depth - 1, alpha, beta, False)
+                    board[x][y] = self.EMPTY
+                    if eval > max_eval:
+                        max_eval = eval
+                        best_move = (x, y)
+                    alpha = max(alpha, eval)
+                    if beta <= alpha:
+                        break
+                return max_eval, best_move
+            else:
+                min_eval = float('inf')
+                best_move = None
+                for x, y in self._get_empty_positions_near_stones(board):
+                    board[x][y] = opponent_color
+                    eval, _ = minimax(board, depth - 1, alpha, beta, True)
+                    board[x][y] = self.EMPTY
+                    if eval < min_eval:
+                        min_eval = eval
+                        best_move = (x, y)
+                    beta = min(beta, eval)
+                    if beta <= alpha:
+                        break
+                return min_eval, best_move
+
+        # Start decision process
         win_move = self._find_winning_move(board, my_color)
         if win_move:
             return win_move
-        
-        # 检查是否需要立即防守
+
         defend_move = self._find_winning_move(board, opponent_color)
         if defend_move:
             return defend_move
-        
-        # ============================================================
-        # Improved strategy implementation for selecting the best move
-        # ============================================================
 
         candidates = self._get_empty_positions_near_stones(board)
-        best_score = -1
         best_move = None
+        best_score = float('-inf')
 
-        for candidate in candidates:
-            x, y = candidate
-            score = 0
+        # Evaluate each candidate
+        for x, y in candidates:
+            # Assume this is your color for evaluation
+            board[x][y] = my_color
+            score = evaluate_position(x, y, my_color)
+            # Reset position
+            board[x][y] = self.EMPTY
             
-            # Evaluate defensive move block opponent's consecutive patterns
-            for dx, dy in self.DIRECTIONS:
-                opponent_count = self._count_consecutive(board, x, y, opponent_color, dx, dy)
-                my_count = self._count_consecutive(board, x, y, my_color, dx, dy)
-                
-                if opponent_count >= 4:  # Block opponent's winning move immediately
-                    score += 100
-                elif opponent_count == 3:  # Block opponent from forming "live four"
-                    score += 50
-                
-                # Evaluate offensive move to create consecutive patterns
-                if my_count == 4:  # Create a winning pattern
-                    score += 100
-                elif my_count == 3:  # Create "live four"
-                    score += 20
-
-            # Additional strategic scoring can be applied here
-            if score > best_score:
+            if not best_move or score > best_score:
                 best_score = score
-                best_move = candidate
+                best_move = (x, y)
 
-        # Return the best move based on evaluation
-        if best_move:
-            return best_move
+        return best_move if best_move else self._get_random_empty_position(board)
 
-        # Fallback: return a random empty position if no strategic candidates found
-        return self._get_random_empty_position(board)
-
-        # ============================================================
-        # END OF STRATEGY IMPLEMENTATION
-        # ============================================================
         
         # ============================================================
         # END OF STRATEGY IMPLEMENTATION

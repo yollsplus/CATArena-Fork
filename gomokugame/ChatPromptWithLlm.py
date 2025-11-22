@@ -25,6 +25,7 @@ parser.add_argument("--llm_api_url", type=str, default="https://az.gptplus5.com/
 parser.add_argument("--llm_api_key", type=str, default="sk-2p51ZI79J5X4OL6S343c17F08f3c432395C711608b2eB0D5", help="LLM API的密钥")
 parser.add_argument("--llm_model", type=str, default="gpt-4o", help="使用的LLM模型")
 parser.add_argument("--summary_output_path", type=str, default="./last_round_summary.json", help="LLM总结输出路径")
+parser.add_argument("--concise", action="store_true", help="是否只输出简洁的分析内容（不包含指令模板）")
 
 
 args = parser.parse_args()
@@ -42,6 +43,7 @@ llm_api_url = args.llm_api_url
 llm_api_key = args.llm_api_key
 llm_model = args.llm_model
 summary_output_path = args.summary_output_path
+is_concise = args.concise
 
 
 game_env_path = f'./{game_env}'
@@ -326,9 +328,14 @@ def summarize_with_llm(csv_path, history_path, code_dir, api_url, api_key, model
 if round_num == 1:
     raise ValueError("ChatPromptWithLlm.py should not be called for Round 1. Use ChatPrompt.py instead.")
 
-# Round 2+: 基于上一轮优化策略
-# 先占位，后面会插入LLM分析
-prompt_header = f'''
+# 如果是简洁模式，不使用模板
+if is_concise:
+    prompt_header = ""
+    prompt_footer = ""
+else:
+    # Round 2+: 基于上一轮优化策略
+    # 先占位，后面会插入LLM分析
+    prompt_header = f'''
 # Round {round_num}: Improve Your Gomoku AI Strategy
 
 ##YOUR MISSION: 
@@ -336,7 +343,7 @@ prompt_header = f'''
 
 '''
 
-prompt_footer = f'''
+    prompt_footer = f'''
 
 ##ACTION STEPS:
 
@@ -364,21 +371,17 @@ edit_file('{dir_path}/ai_service.py', {{
 
 ## ⛔ COMMON MISTAKES TO AVOID (READ CAREFULLY)
 
-1.  **Calling Undefined Functions**:
+1.  **Calling Undefined Functions / Scope Errors**:
+    - **ERROR**: `self.minimax(...)` when `minimax` is defined inside `select_best_move`.
+    - **FIX**: Call nested functions directly: `minimax(...)`.
     - **ERROR**: `if self._detect_pattern(...)` (when `_detect_pattern` is NOT defined in the class).
-    - **FIX**: You MUST define any helper function you use.
-    - **HOW**: Since `replace_python_method` only replaces ONE method, you should define helper functions **inside** `select_best_move` as nested functions.
-    - **Example**:
-      ```python
-      def select_best_move(self, board, ...):
-          def _my_helper(x, y):  # Define it HERE
-              return ...
-          
-          # Now you can use it
-          val = _my_helper(1, 2)
-      ```
+    - **FIX**: Define helpers inside `select_best_move` or use existing class methods.
 
-2.  **Unreachable Code (Early Return)**:
+2.  **Performance & Timeouts**:
+    - **ERROR**: Using Minimax depth > 3 in Python without aggressive pruning.
+    - **FIX**: Limit depth to 2 or 3. Keep evaluation function O(1) or O(N) relative to changes, not O(N^2) full board scan.
+
+3.  **Unreachable Code (Early Return)**:
     - **ERROR**:
       ```python
       if best_move:
@@ -389,7 +392,7 @@ edit_file('{dir_path}/ai_service.py', {{
       ```
     - **FIX**: Remove the early return if you want to run further logic (like Minimax). Only return when you have the FINAL result.
 
-3.  **Syntax Errors**:
+4.  **Syntax Errors**:
     - Ensure all parentheses are closed.
     - Ensure indentation is consistent (4 spaces).
 
@@ -461,17 +464,43 @@ if round_num > 1:
             # 否则转为JSON
             analysis_text = json.dumps(llm_summary, indent=2, ensure_ascii=False)
         
-        # 分析放在最前面
-        prompt_data += f"\n##Expert Analysis from Last Round\n\n{analysis_text}\n"
+        if is_concise:
+            # 简洁模式：只输出分析内容 + 强制执行指令
+            prompt_data = analysis_text + f"""
+
+IMPORTANT: Based on the analysis above, you MUST now call `replace_python_method` (preferred) or `edit_file` to modify `{dir_path}/ai_service.py` to implement these improvements. Do not just plan, ACT NOW.
+
+## CRITICAL CODING & PERFORMANCE WARNINGS (READ CAREFULLY):
+
+1. **NESTED FUNCTIONS & SCOPE**:
+   - If you define a helper function (like `minimax` or `evaluate`) inside `select_best_move`, **DO NOT** call it with `self.`. Call it directly.
+   - **WRONG**: `self.minimax(...)` (raises AttributeError)
+   - **RIGHT**: `minimax(...)`
+
+2. **PERFORMANCE (TIMEOUT PREVENTION)**:
+   - **MAX DEPTH**: Python is slow. Do NOT use depth > 3 for Minimax unless you have highly optimized pruning. Depth 5 WILL TIMEOUT (>10s).
+   - **EVALUATION**: Keep evaluation simple. Do not scan the entire board (15x15) at every leaf node.
+
+3. **RECURSION LOGIC**:
+   - If your `check_win` function needs the last move coordinates (x, y), make sure your recursive `minimax` passes them along or calculates them correctly.
+   - **Common Bug**: Using `x, y` from the outer loop inside a recursive function where `x, y` should be the *current* move being evaluated.
+"""
+        else:
+            # 完整模式：分析放在最前面
+            prompt_data += f"\n##Expert Analysis from Last Round\n\n{analysis_text}\n"
     else:
         print("\n[WARNING] LLM分析失败，使用原始数据引用方式...")
-        prompt_data += f"\n##Tournament Data (Analyze This)\n- Report: {last_round_info}\n- History: {last_round_log_dir}\n- Previous code: {last_round_dir}\n"
+        if is_concise:
+             prompt_data = f"Analysis failed. Please check logs: {last_round_info}"
+        else:
+             prompt_data += f"\n##Tournament Data (Analyze This)\n- Report: {last_round_info}\n- History: {last_round_log_dir}\n- Previous code: {last_round_dir}\n"
     
     # 添加执行指令（footer）
-    prompt_data += prompt_footer
+    if not is_concise:
+        prompt_data += prompt_footer
 
 # 添加语言要求
-if language:
+if language and not is_concise:
     prompt_data += f"\n{language} is the language you should use to develop your AI service."
 
 # 输出最终提示词

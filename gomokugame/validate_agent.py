@@ -125,28 +125,49 @@ class ServiceManager:
     
     def cleanup(self):
         """清理所有进程"""
-        if not self.processes:
-            return
-        
         print("\n🧹 清理服务进程...")
         
-        for name, proc, port in self.processes:
-            try:
-                if proc.poll() is None:
-                    if sys.platform == 'win32':
-                        proc.send_signal(signal.CTRL_BREAK_EVENT)
-                    else:
-                        proc.terminate()
-                    
-                    try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait()
-            except Exception as e:
-                pass
+        # 1. 清理我们自己启动的进程
+        if self.processes:
+            for name, proc, port in self.processes:
+                try:
+                    if proc.poll() is None:
+                        if sys.platform == 'win32':
+                            proc.send_signal(signal.CTRL_BREAK_EVENT)
+                        else:
+                            proc.terminate()
+                        
+                        try:
+                            proc.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                            proc.wait()
+                except Exception as e:
+                    pass
+            self.processes.clear()
         
-        self.processes.clear()
+        # 2. 强力清理：检查端口占用并杀掉残留进程
+        # 端口列表：9000 (server), 12001 (v1), 12002 (v2)
+        target_ports = [9000, 12001, 12002]
+        
+        if sys.platform == 'win32':
+            for port in target_ports:
+                try:
+                    # 查找占用端口的 PID
+                    cmd = f"netstat -ano | findstr :{port}"
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                    if result.stdout:
+                        lines = result.stdout.strip().split('\n')
+                        for line in lines:
+                            parts = line.strip().split()
+                            if len(parts) >= 5:
+                                pid = parts[-1]
+                                if pid != '0':
+                                    print(f"   🔪 强制杀掉占用端口 {port} 的进程 (PID: {pid})")
+                                    subprocess.run(f"taskkill /F /PID {pid}", shell=True, capture_output=True)
+                except Exception:
+                    pass
+        
         print("✅ 清理完成\n")
 
 
@@ -329,6 +350,31 @@ class AgentValidator:
         
         return matches
     
+    def _debug_ai_service(self, port: int, ai_name: str):
+        """调试 AI 服务，发送测试请求并打印错误"""
+        print(f"\n🔍 调试 AI 服务: {ai_name} (端口 {port})")
+        url = f"http://localhost:{port}/get_move"
+        
+        # 构造一个简单的测试请求
+        payload = {
+            "game_id": "debug_test",
+            "board": [[0] * 15 for _ in range(15)],
+            "current_player": "black"
+        }
+        
+        try:
+            resp = requests.post(url, json=payload, timeout=5)
+            if resp.status_code != 200:
+                print(f"❌ AI 返回错误状态码: {resp.status_code}")
+                try:
+                    print(f"❌ 错误详情: {resp.json()}")
+                except:
+                    print(f"❌ 原始响应: {resp.text}")
+            else:
+                print(f"✅ AI 响应正常: {resp.json().get('move')}")
+        except Exception as e:
+            print(f"❌ 请求异常: {e}")
+
     def _run_match(self, v1: int, v2: int, rounds: int) -> Dict:
         """运行单场对战"""
         # AI 路径
@@ -347,6 +393,10 @@ class AgentValidator:
         
         if not self.service_manager.start_ai_service(v2_path, v2_port, v2_name):
             return {"error": f"v{v2} 启动失败"}
+            
+        # 🔍 启动后立即进行健康检查和调试
+        self._debug_ai_service(v1_port, v1_name)
+        self._debug_ai_service(v2_port, v2_name)
         
         # 运行对战
         try:
@@ -441,7 +491,7 @@ class AgentValidator:
                                 proc.send_signal(signal.CTRL_BREAK_EVENT)
                             else:
                                 proc.terminate()
-                            proc.wait(timeout=3)
+                        proc.wait(timeout=3)
                     except:
                         pass
                     self.service_manager.processes.remove((name, proc, port))
