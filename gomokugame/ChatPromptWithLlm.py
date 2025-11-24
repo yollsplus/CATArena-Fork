@@ -239,7 +239,7 @@ def summarize_with_llm(csv_path, history_path, code_dir, api_url, api_key, model
     analysis_prompt = create_llm_analysis_prompt(data_summary)
     
     # 可选：保存提示词以供调试
-    prompt_debug_path = "./last_round_summary_prompt.txt"
+    prompt_debug_path = "./llm_summary/last_round_summary_prompt.txt"
     with open(prompt_debug_path, 'w', encoding='utf-8') as f:
         f.write(analysis_prompt)
     print(f"  - 提示词已保存到: {prompt_debug_path}")
@@ -261,7 +261,7 @@ def summarize_with_llm(csv_path, history_path, code_dir, api_url, api_key, model
         }
         
         # 保存总结
-        summary_output_path = "./last_round_summary.json"
+        summary_output_path = "./llm_summary/last_round_summary.json"
         with open(summary_output_path, 'w', encoding='utf-8') as f:
             json.dump(summary_data, f, ensure_ascii=False, indent=2)
         
@@ -281,7 +281,7 @@ def generate_prompt_with_llm(model_name="gpt_4_1", language="", game_env="gomoku
                             round_num=1, log_path=None, last_round_dir=None,
                             llm_api_url="https://az.gptplus5.com/v1/chat/completions",
                             llm_api_key="sk-2p51ZI79J5X4OL6S343c17F08f3c432395C711608b2eB0D5",
-                            llm_model="gpt-4o", summary_output_path="./last_round_summary.json",
+                            llm_model="gpt-4o", summary_output_path="./llm_summary/last_round_summary.json",
                             is_concise=False):
     
     game_env_path = f'./{game_env}'
@@ -397,7 +397,7 @@ if __name__ == "__main__":
     parser.add_argument("--llm_api_url", type=str, default="https://az.gptplus5.com/v1/chat/completions", help="LLM API的URL")
     parser.add_argument("--llm_api_key", type=str, default="sk-2p51ZI79J5X4OL6S343c17F08f3c432395C711608b2eB0D5", help="LLM API的密钥")
     parser.add_argument("--llm_model", type=str, default="gpt-4o", help="使用的LLM模型")
-    parser.add_argument("--summary_output_path", type=str, default="./last_round_summary.json", help="LLM总结输出路径")
+    parser.add_argument("--summary_output_path", type=str, default="./llm_summary/last_round_summary.json", help="LLM总结输出路径")
     parser.add_argument("--concise", action="store_true", help="是否只输出简洁的分析内容（不包含指令模板）")
 
 
