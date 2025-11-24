@@ -123,8 +123,11 @@ class GomokuArena:
             return False
     
     def get_ai_move(self, ai_config: AIConfig, game_id: str, board: List[List[int]], 
-                   my_color: str) -> Tuple[Optional[List[int]], float]:
-        """获取AI落子（带超时监控）"""
+                   my_color: str) -> Tuple[Optional[List[int]], float, Optional[str]]:
+        """
+        获取AI落子（带超时监控）
+        Returns: (move, thinking_time, error_reason)
+        """
         start_time = time.time()
         
         try:
@@ -152,10 +155,11 @@ class GomokuArena:
                     if response.status_code == 200:
                         data = response.json()
                         move = data.get('move')
-                        return move, thinking_time
+                        return move, thinking_time, None
                     else:
-                        logger.error(f"AI {ai_config.ai_name} 返回错误: {response.status_code}")
-                        return None, thinking_time
+                        error_msg = f"HTTP {response.status_code}: {response.text[:100]}"
+                        logger.error(f"AI {ai_config.ai_name} 返回错误: {error_msg}")
+                        return None, thinking_time, "ai_error"
                         
                 except TimeoutError:
                     logger.error(f"AI {ai_config.ai_name} 超时 ({self.timeout}秒)")
@@ -164,11 +168,11 @@ class GomokuArena:
                         future.cancel()
                     except:
                         pass
-                    return None, self.timeout
+                    return None, self.timeout, "timeout"
                     
         except Exception as e:
             logger.error(f"AI {ai_config.ai_name} 请求失败: {e}")
-            return None, time.time() - start_time
+            return None, time.time() - start_time, "connection_error"
             
     def play_game(self, ai_black: AIConfig, ai_white: AIConfig) -> GameResult:
         """进行单局对战"""
@@ -326,7 +330,7 @@ class GomokuArena:
                 current_ai = ai_black if current_player == "black" else ai_white
                 
                 # 获取AI落子
-                move, thinking_time = self.get_ai_move(
+                move, thinking_time, error_reason = self.get_ai_move(
                     current_ai, actual_game_id, board, current_player
                 )
                 
@@ -351,6 +355,9 @@ class GomokuArena:
                     except Exception as e:
                         logger.warning(f"获取游戏历史和状态失败: {e}")
                     
+                    # 使用具体的错误原因
+                    end_reason = error_reason if error_reason else "error"
+                    
                     result = GameResult(
                         game_id=actual_game_id,
                         player_black=ai_black.ai_id,
@@ -361,12 +368,12 @@ class GomokuArena:
                         black_avg_time=sum(black_times) / len(black_times) if black_times else 0,
                         white_avg_time=sum(white_times) / len(white_times) if white_times else 0,
                         game_duration=game_duration,
-                        end_reason="timeout",
+                        end_reason=end_reason,
                         game_history=game_history,
                         final_state=final_state
                     )
                     
-                    logger.info(f"游戏结束: {game_id} - {current_ai.ai_name} 超时，{winner} 获胜")
+                    logger.info(f"游戏结束: {game_id} - {current_ai.ai_name} 异常({end_reason})，{winner} 获胜")
                     # 添加短暂延迟，确保资源清理
                     time.sleep(0.1)
                     return result

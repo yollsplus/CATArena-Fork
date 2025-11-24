@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-CATArena 自动化迭代管理器
-========================================
-python auto_iteration_manager.py --config config.json --rounds 3
+运行请输入
+python auto_iteration_manager.py --config my_config.json
 """
 
 import json
@@ -21,81 +20,75 @@ import signal
 import atexit
 import anthropic
 from openai import OpenAI
+import ChatPrompt
+import ChatPromptWithLlm
 
 
 class ServiceManager:
-    """简洁的服务进程管理器"""
+    """统一管理游戏服务和ai选手们的服务"""
     
     def __init__(self, base_dir: Path):
         self.base_dir = base_dir
         self.processes = []  # [(name, process, port), ...]
-        
-        # 注册清理函数
+
         atexit.register(self.cleanup)
     
     def start_game_server(self, game: str = 'gomoku', port: int = 9000) -> bool:
-        """启动游戏服务器"""
-        print(f"\n🚀 启动游戏服务器 ({game})...")
+        print(f"启动游戏服务器 ({game})...")
         
         server_dir = self.base_dir / game
         
-        # 创建日志文件
         log_dir = self.base_dir / "service_logs"
         log_dir.mkdir(exist_ok=True)
         log_file = log_dir / f"{game}_server.log"
         
         try:
-            # 将输出重定向到文件，避免管道阻塞
+            #将输出重定向到文件，避免管道阻塞
             with open(log_file, 'w', encoding='utf-8') as f:
                 proc = subprocess.Popen(
                     [sys.executable, 'server.py'],
                     cwd=server_dir,
                     stdout=f,
-                    stderr=subprocess.STDOUT,  # 合并到 stdout
+                    stderr=subprocess.STDOUT,
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
                 )
             
             self.processes.append(('game_server', proc, port))
             print(f"   日志文件: {log_file}")
             
-            # 等待服务启动
             if self._wait_for_service(f'http://localhost:{port}/health', timeout=15):
-                print(f"   ✅ 游戏服务器已启动 (端口 {port})")
+                print(f"游戏服务器已启动 (端口 {port})")
                 return True
             else:
-                print(f"   ⚠️  游戏服务器启动超时")
-                print(f"   请查看日志: {log_file}")
+                print(f"游戏服务器启动超时")
+                print(f"请查看日志: {log_file}")
                 return False
                 
         except Exception as e:
-            print(f"   ❌ 启动失败: {e}")
+            print(f"游戏服务器启动失败: {e}")
             return False
     
     def start_ai_service(self, ai_path: Path, port: int, ai_name: str, ai_id: str = None) -> bool:
         """启动 AI 服务（只传 --port 参数）"""
-        print(f"🤖 启动 AI 服务: {ai_name} (端口 {port})...")
+        print(f"启动 AI 服务: {ai_name} (端口 {port})...")
         
         # 找到第一个 .py 文件
         py_files = [f for f in ai_path.glob("*.py") if f.name != '__init__.py']
         
         if not py_files:
-            print(f"   ❌ 找不到 Python 文件")
+            print(f"找不到Python文件")
             return False
         
         py_file = py_files[0].name
-        print(f"   使用文件: {py_file}")
         
-        # 创建日志文件
         log_dir = self.base_dir / "service_logs"
         log_dir.mkdir(exist_ok=True)
         safe_name = ai_name.replace(' ', '_').replace('/', '_')
         log_file = log_dir / f"{safe_name}_{port}.log"
         
         try:
-            # 只传 --port 参数，如果 AI 不支持就会报错
             cmd = [sys.executable, py_file, '--port', str(port)]
             
-            # 将输出重定向到文件，避免管道阻塞
             with open(log_file, 'w', encoding='utf-8') as f:
                 proc = subprocess.Popen(
                     cmd,
@@ -106,23 +99,21 @@ class ServiceManager:
                 )
             
             self.processes.append((f'ai_{ai_name}', proc, port))
-            print(f"   日志文件: {log_file}")
+            print(f"日志文件: {log_file}")
             
-            # 等待服务启动
             if self._wait_for_service(f'http://localhost:{port}/health', timeout=10):
-                print(f"   ✅ {ai_name} 已启动")
+                print(f"{ai_name} 已启动")
                 return True
             else:
-                # 检查进程是否崩溃
                 if proc.poll() is not None:
-                    print(f"   ❌ AI 启动失败，进程已退出")
-                    print(f"   请查看日志: {log_file}")
+                    print(f"AI {ai_name} 启动失败，进程已退出")
+                    print(f"请查看日志: {log_file}")
                 else:
-                    print(f"   ⚠️  健康检查超时（可能 /health 端点未实现）")
+                    print(f"健康检查超时（可能 /health 端点未实现）")
                 return False
                 
         except Exception as e:
-            print(f"   ❌ 启动失败: {e}")
+            print(f"启动失败: {e}")
             return False
     
     def _wait_for_service(self, url: str, timeout: int = 30) -> bool:
@@ -141,15 +132,14 @@ class ServiceManager:
         return False
     
     def cleanup(self):
-        """清理所有进程"""
         if not self.processes:
             return
         
-        print("\n🧹 清理服务进程...")
+        print("清理服务进程...")
         
         for name, proc, port in self.processes:
             try:
-                if proc.poll() is None:  # 进程还在运行
+                if proc.poll() is None:  #进程还在运行
                     print(f"   停止 {name} (端口 {port})...")
                     
                     if sys.platform == 'win32':
@@ -159,24 +149,21 @@ class ServiceManager:
                         # Linux/Mac: 发送 SIGTERM
                         proc.terminate()
                     
-                    # 等待进程结束
                     try:
                         proc.wait(timeout=5)
                     except subprocess.TimeoutExpired:
-                        # 强制杀死
                         proc.kill()
                         proc.wait()
                     
-                    print(f"      ✅ 已停止")
+                    print(f"已停止")
             except Exception as e:
-                print(f"      ⚠️  停止失败: {e}")
+                print(f"停止失败: {e}")
         
         self.processes.clear()
-        print("✅ 清理完成\n")
+        print("清理完成\n")
 
 
 class AutoIterationManager:
-    """CATArena自动化迭代管理器"""
     
     def __init__(self, config_path: str):
         self.config = self._load_config(config_path)
@@ -185,11 +172,9 @@ class AutoIterationManager:
         self.iteration_log = []
         self.chat_history = []  # 存储对话历史，实现多轮对话上下文保持
         
-        # 创建输出目录
-        self.output_dir = self.base_dir / "auto_iteration_output"
+        self.output_dir = self.base_dir / "iteration_contents"
         self.output_dir.mkdir(exist_ok=True)
         
-        # 创建服务管理器
         self.service_manager = ServiceManager(self.base_dir)
         
         print("=" * 80)
@@ -208,14 +193,10 @@ class AutoIterationManager:
     
     def run_full_iteration(self):
         """
-        运行完整的迭代流程
-        
-        流程：
         1. Round 1: 生成初始提示词 → 发送给Agent → 自动部署代码 → 运行对战
         2. Round 2+: 分析上轮日志 → 生成增强提示词 → 发送给Agent → 自动部署代码 → 运行对战
         3. 重复直到达到最大轮次
-        
-        自动部署：Agent生成的代码在 ./gomoku/AI_develop/ 中，
+        自动部署:Agent生成的代码在 ./gomoku/AI_develop/ 中，
                   脚本会自动复制到 AI_competitors/gomoku/round_N/<ai_name>/gomoku_v1/
         """
         max_rounds = self.config['iteration']['max_rounds']
@@ -228,47 +209,32 @@ class AutoIterationManager:
             print("=" * 80)
             
             try:
-                # Step 1: 生成提示词
                 prompt = self._generate_prompt(round_num)
-                
-                # Step 2: 保存提示词到文件
                 prompt_file = self._save_prompt(prompt, round_num)
-                
-                # Step 3: 发送提示词给Agent (带语法检查循环)
                 agent_response = self._send_to_agent_with_validation(prompt, round_num)
-                
-                # Step 4: 保存Agent响应
                 self._save_agent_response(agent_response, round_num)
-                
-                # Step 5: 自动部署代码
                 deploy_success = self._auto_deploy_code(round_num)
-                
                 if not deploy_success:
-                    print(f"\n⚠️  代码部署失败，跳过 Round {round_num} 对战")
+                    print(f"代码部署失败，跳过 Round{round_num}对战")
                     continue
-                
-                # Step 6: 运行对战
                 if self._should_run_arena(round_num):
                     arena_result = self._run_arena(round_num)
                     
-                    # Step 7: 记录本轮结果
+
                     self._log_round_result(round_num, prompt_file, agent_response, arena_result)
                 else:
-                    print(f"⚠️  跳过 Round {round_num} 对战（没有可用的 AI）")
-                
-                print(f"\n✅ Round {round_num} 完成!")
+                    print(f"Round{round_num}没有可用的AI")
+
+                print(f"\nRound{round_num}完成!")
                 
             except Exception as e:
-                print(f"\n❌ Round {round_num} 出错: {e}")
+                print(f"\nRound{round_num}出错: {e}")
                 import traceback
                 traceback.print_exc()
                 
                 response = input("\n是否继续下一轮？(y/n): ")
                 if response.lower() != 'y':
                     break
-        
-        # 生成最终报告
-        self._generate_final_report()
         
         print("\n" + "=" * 80)
         print("迭代流程完成!")
@@ -278,139 +244,72 @@ class AutoIterationManager:
     def _generate_prompt(self, round_num: int) -> str:
         """
         生成提示词
-        
-        Args:
-            round_num: 当前轮次
-            
-        Returns:
-            生成的提示词文本
         """
-        print(f"\n[1/6] 生成 Round {round_num} 提示词...")
+        print(f"\n[1/6]生成 Round {round_num} 提示词...")
+        
+        prompt = ""
         
         if round_num == 1:
-            # Round 1: 使用基础 ChatPrompt.py
-            cmd = [
-                sys.executable,
-                'ChatPrompt.py',
-                '--model_name', f"{self.config['agent']['model']}_ai",
-                '--round_num', '1',
-                '--game_env', self.config['game'],
-                '--game_suffix', self.config['game']
-            ]
+            #使用ChatPrompt.py
+            prompt = ChatPrompt.generate_prompt(
+                model_name=f"{self.config['agent']['model']}_ai",
+                round_num=1,
+                game_env=self.config['game'],
+                game_suffix=self.config['game']
+            )
         else:
-            # Round 2+: 读取 AI_develop 目录（Agent在Round 1工作的地方）
-            # Agent应该读它自己上一轮编辑的代码，而不是已经被复制走的版本
+            #先确认AI_develop里agent在上一轮里完成的代码
             prev_round_dir = self.base_dir / f"{self.config['game']}/AI_develop"
-            
             if not prev_round_dir.exists():
-                print(f"\n⚠️  错误: 找不到 AI_develop 目录: {prev_round_dir}")
-                print(f"请先完成以下步骤:")
-                print(f"  1. 确保 Round {round_num-1} 已经运行完成")
-                print(f"  2. AI_develop 目录应该存在并包含上一轮的代码")
-                print(f"\n提示: Agent 响应已保存在 ./auto_iteration_output/round_{round_num-1}_agent_response.json")
+                print(f"\n错误:在{prev_round_dir}下找不到 AI_develop目录")
+                print(f"\n提示:Agent 响应已保存在 ./auto_iteration_output/round_{round_num-1}_agent_response.json")
                 return ""
             
-            # Round 2+: 使用 ChatPromptWithLlm.py 分析上一轮
+            #Round2+使用ChatPromptWithLlm.py分析上一轮代码和对局记录
             use_llm = self.config['iteration'].get('use_llm_summary', False)
-            
             if use_llm:
                 llm_config = self.config['iteration']['llm_summary_config']
-                cmd = [
-                    sys.executable,
-                    'ChatPromptWithLlm.py',
-                    '--model_name', f"{self.config['agent']['model']}_ai_v{round_num}",
-                    '--round_num', str(round_num),
-                    '--log_path', './reports',
-                    '--last_round_dir', str(prev_round_dir),
-                    '--llm_api_url', llm_config['api_url'],
-                    '--llm_api_key', llm_config['api_key'],
-                    '--llm_model', llm_config['model'],
-                    '--concise'  # 使用简洁模式，只输出分析内容
-                ]
-            else:
-                cmd = [
-                    sys.executable,
-                    'ChatPrompt.py',
-                    '--model_name', f"{self.config['agent']['model']}_ai_v{round_num}",
-                    '--round_num', str(round_num),
-                    '--log_path', './reports',
-                    '--last_round_dir', str(prev_round_dir),
-                    '--game_env', self.config['game'],
-                    '--game_suffix', self.config['game']
-                ]
+                prompt = ChatPromptWithLlm.generate_prompt_with_llm(
+                    model_name=f"{self.config['agent']['model']}_ai_v{round_num}",
+                    round_num=round_num,
+                    log_path='./reports',
+                    last_round_dir=str(prev_round_dir),
+                    llm_api_url=llm_config['api_url'],
+                    llm_api_key=llm_config['api_key'],
+                    llm_model=llm_config['model'],
+                    is_concise=True  #使用简洁模式，只输出分析内容
+                )
+            else: 
+                prompt = ChatPrompt.generate_prompt(
+                    model_name=f"{self.config['agent']['model']}_ai_v{round_num}",
+                    round_num=round_num,
+                    log_path='./reports',
+                    last_round_dir=str(prev_round_dir),
+                    game_env=self.config['game'],
+                    game_suffix=self.config['game']
+                )
         
-        # 执行命令（设置UTF-8环境变量避免乱码）
-        env = os.environ.copy()
-        env['PYTHONIOENCODING'] = 'utf-8'  # 强制Python子进程使用UTF-8编码
-        
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=self.base_dir,
-            encoding='utf-8',
-            errors='ignore',  # 忽略无法解码的字符
-            env=env
-        )
-        
-        if result.returncode != 0:
-            print(f"⚠️  生成提示词时出现警告:")
-            if result.stderr:
-                print(result.stderr)
-        
-        prompt = result.stdout
         if not prompt:
-            print("⚠️  警告: 提示词为空")
-            print(f"返回码: {result.returncode}")
-            print(f"错误输出: {result.stderr}")
+            print("警告: 提示词为空")
             return ""
         
-        # 清理 ChatPromptWithLlm.py 的日志输出
-        if "最终提示词:" in prompt:
-            parts = prompt.split("最终提示词:")
-            if len(parts) > 1:
-                # 取最后一部分
-                raw_prompt = parts[-1]
-                # 去除分隔符（如果有）
-                lines = raw_prompt.splitlines()
-                # 过滤掉全是等号的行
-                clean_lines = [line for line in lines if not line.strip().startswith("======")]
-                prompt = "\n".join(clean_lines).strip()
-        
-        print(f"✅ 提示词已生成 ({len(prompt)} 字符)")
+        print(f"提示词已生成({len(prompt)}字符)")
         
         return prompt
     
     def _save_prompt(self, prompt: str, round_num: int) -> Path:
-        """
-        保存提示词到文件
-        
-        Args:
-            prompt: 提示词内容
-            round_num: 轮次
-            
-        Returns:
-            保存的文件路径
-        """
         print(f"\n[2/6] 保存提示词...")
         
         prompt_file = self.output_dir / f"round_{round_num}_prompt.txt"
         with open(prompt_file, 'w', encoding='utf-8') as f:
             f.write(prompt)
         
-        print(f"✅ 提示词已保存到: {prompt_file}")
+        print(f"提示词已保存到: {prompt_file}")
         return prompt_file
     
     def _send_to_agent_with_validation(self, initial_prompt: str, round_num: int) -> Dict[str, Any]:
         """
         发送提示词给Agent，并进行代码语法检查循环
-        
-        Args:
-            initial_prompt: 初始提示词
-            round_num: 轮次
-            
-        Returns:
-            Agent的最终响应
         """
         max_retries = 3
         current_prompt = initial_prompt
@@ -418,7 +317,7 @@ class AutoIterationManager:
         
         for attempt in range(max_retries + 1):
             if attempt > 0:
-                print(f"\n[3/6] 🔄 修复尝试 {attempt}/{max_retries}...")
+                print(f"\n[3/6]修复尝试 {attempt}/{max_retries}...")
             
             # 发送请求
             last_response = self._send_to_agent(current_prompt, round_num)
@@ -428,19 +327,18 @@ class AutoIterationManager:
             syntax_error = self._check_code_syntax(ai_develop_dir)
             
             if syntax_error:
-                print(f"⚠️  检测到语法错误 (尝试 {attempt + 1}/{max_retries + 1}):")
+                print(f"检测到语法错误 (尝试 {attempt + 1}/{max_retries + 1}):")
                 print(f"   {syntax_error}")
                 
                 if attempt < max_retries:
-                    # 构建修复提示词
                     current_prompt = (
                         f"The code you modified has syntax errors. Please fix them immediately.\n\n"
                         f"Error details:\n{syntax_error}\n\n"
-                        f"Use `edit_file` or `replace_python_method` to fix the code."
+                        f"Use `replace_python_method` to fix the code."
                     )
                     continue
                 else:
-                    print("❌ 达到最大修复次数，放弃修复，继续执行...")
+                    print("达到最大修复次数，放弃修复，继续执行...")
                     return last_response
 
             # 语法检查通过，进行运行时检查
@@ -448,14 +346,13 @@ class AutoIterationManager:
             
             if not runtime_error:
                 if attempt > 0:
-                    print("✅ 修复成功！")
+                    print("修复成功！")
                 return last_response
             
-            print(f"⚠️  检测到运行时错误 (尝试 {attempt + 1}/{max_retries + 1}):")
-            print(f"   {runtime_error}")
-            
+            print(f"检测到运行时错误 (尝试 {attempt + 1}/{max_retries + 1}):")
+            print(f"{runtime_error}")
+            #单纯一个runtime error可能不一定能让agent知道自己哪里不符合游戏服务器的规定
             if attempt < max_retries:
-                # 构建修复提示词
                 current_prompt = (
                     f"The code you modified has no syntax errors, but it failed to run validation tests.\n"
                     f"This usually means there are runtime errors like NameError, ImportError, or logic errors in your strategy.\n\n"
@@ -463,21 +360,16 @@ class AutoIterationManager:
                     f"Please fix the runtime error immediately."
                 )
             else:
-                print("❌ 达到最大修复次数，放弃修复，继续执行...")
+                print("达到最大修复次数，放弃修复，继续执行...")
         
         return last_response
 
     def _check_code_runtime(self, directory: Path) -> Optional[str]:
         """
         检查代码是否能正常运行并响应请求
-        
-        Args:
-            directory: 代码目录
-            
-        Returns:
-            错误信息字符串，如果没有错误则返回 None
+        Returns:错误信息字符串，如果没有错误则返回 None
         """
-        print("   正在进行运行时验证...")
+        print("正在进行运行时验证...")
         
         # 找到 Python 文件
         py_files = list(directory.glob("*.py"))
@@ -489,7 +381,6 @@ class AutoIterationManager:
         
         test_port = 19999 # 使用一个测试端口
         
-        # 启动进程
         import subprocess
         import sys
         import time
@@ -562,10 +453,6 @@ class AutoIterationManager:
     def _check_code_syntax(self, directory: Path) -> Optional[str]:
         """
         检查目录下 Python 文件的语法
-        
-        Args:
-            directory: 代码目录
-            
         Returns:
             错误信息字符串，如果没有错误则返回 None
         """
@@ -585,11 +472,6 @@ class AutoIterationManager:
     def _send_to_agent(self, prompt: str, round_num: int) -> Dict[str, Any]:
         """
         发送提示词给Agent
-        
-        Args:
-            prompt: 提示词
-            round_num: 轮次
-            
         Returns:
             Agent的响应
         """
@@ -798,13 +680,7 @@ class AutoIterationManager:
     
     def _auto_deploy_code(self, round_num: int) -> bool:
         """
-        自动部署代码：从 ./gomoku/AI_develop/ 复制到 AI_competitors/gomoku/round_N/
-        
-        Args:
-            round_num: 当前轮次
-            
-        Returns:
-            是否部署成功
+        自动部署代码：从 ./gomoku/AI_develop/ 复制到 AI_competitors/gomoku/round_N/<model_name>/v<round_num>/
         """
         print(f"\n[5/6] 自动部署代码...")
         
@@ -865,7 +741,7 @@ class AutoIterationManager:
         return True
     
     def _should_run_arena(self, round_num: int) -> bool:
-        """检查是否应该运行对战（新结构：先模型后版本）"""
+        """检查是否应该运行对战"""
         competitors_dir = self.base_dir / f"AI_competitors/{self.config['game']}"
         
         if not competitors_dir.exists():
@@ -891,12 +767,6 @@ class AutoIterationManager:
     def _start_all_services(self, round_num: int) -> bool:
         """
         自动启动所有服务
-        
-        Args:
-            round_num: 当前轮次
-            
-        Returns:
-            是否全部启动成功
         """
         print("\n" + "=" * 60)
         print("自动启动服务")
@@ -985,15 +855,6 @@ class AutoIterationManager:
         return None
     
     def _run_arena(self, round_num: int) -> Dict[str, Any]:
-        """
-        运行对战竞技场
-        
-        Args:
-            round_num: 轮次
-            
-        Returns:
-            对战结果信息
-        """
         print(f"\n[6/6] 运行 Round {round_num} 对战...")
         
         game = self.config['game']
@@ -1128,58 +989,13 @@ class AutoIterationManager:
         if arena_result.get("csv_report"):
             print(f"   Arena报告: {arena_result.get('csv_report')}")
             print(f"   详细历史: {arena_result.get('json_report')}")
-    
-    def _generate_final_report(self):
-        """生成最终评测报告"""
-        print("\n" + "=" * 80)
-        print("生成最终评测报告...")
-        print("=" * 80)
-        
-        report = {
-            "evaluation_summary": {
-                "total_rounds": len(self.iteration_log),
-                "game": self.config['game'],
-                "agent_type": self.config['agent']['type'],
-                "agent_model": self.config['agent']['model'],
-                "start_time": self.iteration_log[0]['timestamp'] if self.iteration_log else None,
-                "end_time": self.iteration_log[-1]['timestamp'] if self.iteration_log else None
-            },
-            "rounds": self.iteration_log,
-            "config": self.config
-        }
-        
-        report_file = self.output_dir / "final_report.json"
-        with open(report_file, 'w', encoding='utf-8') as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
-        
-        print(f"✅ 最终报告已保存到: {report_file}")
-
 
 def main():
-    parser = argparse.ArgumentParser(description='CATArena 自动化迭代管理器')
+    parser = argparse.ArgumentParser(description='CATArena自动迭代')
     parser.add_argument('--config', type=str, required=True, help='配置文件路径')
-    parser.add_argument('--rounds', type=int, help='覆盖配置文件中的最大轮次')
-    
     args = parser.parse_args()
-    
-    # 加载并可能覆盖配置
-    if args.rounds:
-        with open(args.config, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-        config['iteration']['max_rounds'] = args.rounds
-        
-        # 保存临时配置
-        temp_config = Path(args.config).parent / 'temp_config.json'
-        with open(temp_config, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=2)
-        
-        manager = AutoIterationManager(str(temp_config))
-    else:
-        manager = AutoIterationManager(args.config)
-    
-    # 运行迭代
+    manager = AutoIterationManager(args.config)
     manager.run_full_iteration()
-
 
 if __name__ == '__main__':
     main()

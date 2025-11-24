@@ -53,75 +53,65 @@ class GomokuAI:
     # 核心策略函数 - 需要你实现
     # ========================
     
-    def select_best_move(self, board: List[List[int]], my_color: int, opponent_color: int) -> Tuple[int, int]:
-        def evaluate_position(x: int, y: int, color: int) -> int:
-            score = 0
-            patterns = [(1, 0), (0, 1), (1, 1), (1, -1)]
-            for dx, dy in patterns:
-                count = self._count_consecutive(board, x, y, color, dx, dy)
-                score += count ** 2  # Prioritize forming sequences and blocking opposing ones
-                if count == 4:
-                    score += 500  # Immediate win condition
-                elif count == 3:
-                    score += 100  # Threat building
-                elif count == 2:
-                    score += 10   # Early potential
-            return score
-
-        def minimax(board: List[List[int]], depth: int, alpha: int, beta: int, maximizing: bool) -> Tuple[int, Tuple[int, int]]:
-            nonlocal my_color, opponent_color
-            if depth == 0 or self._is_empty_board(board):
-                max_score = float('-inf')
-                best_move = None
-                for x, y in self._get_empty_positions_near_stones(board):
-                    score = evaluate_position(x, y, my_color if maximizing else opponent_color)
-                    if score > max_score:
-                        max_score = score
-                        best_move = (x, y)
-                return max_score, best_move
-
-            if maximizing:
-                max_eval = float('-inf')
-                best_move = None
-                for x, y in self._get_empty_positions_near_stones(board):
-                    board[x][y] = my_color
-                    eval, _ = minimax(board, depth - 1, alpha, beta, False)
-                    board[x][y] = self.EMPTY
-                    if eval > max_eval:
-                        max_eval = eval
-                        best_move = (x, y)
-                    alpha = max(alpha, eval)
-                    if beta <= alpha:
-                        break
-                return max_eval, best_move
-            else:
-                min_eval = float('inf')
-                best_move = None
-                for x, y in self._get_empty_positions_near_stones(board):
-                    board[x][y] = opponent_color
-                    eval, _ = minimax(board, depth - 1, alpha, beta, True)
-                    board[x][y] = self.EMPTY
-                    if eval < min_eval:
-                        min_eval = eval
-                        best_move = (x, y)
-                    beta = min(beta, eval)
-                    if beta <= alpha:
-                        break
-                return min_eval, best_move
-
+    def select_best_move(self, board: List[List[int]], my_color: int, 
+                        opponent_color: int) -> Tuple[int, int]:
+        """
+        选择最佳走法 - 这是你需要实现的核心策略函数
+        
+        参数:
+            board: 15x15的棋盘，0=空，1=黑，2=白
+            my_color: 我方颜色 (1或2)
+            opponent_color: 对手颜色 (1或2)
+        
+        返回:
+            (row, col): 你选择的走法位置
+        
+        提示:
+            - 优先考虑能立即获胜的走法
+            - 其次考虑防守对手的威胁
+            - 然后考虑建立自己的进攻态势
+            - 可以使用下面提供的辅助函数
+        """
+        # 第一步下中心
+        if self._is_empty_board(board):
+            center = self.BOARD_SIZE // 2
+            return (center, center)
+        
+        # 检查能否立即获胜
         win_move = self._find_winning_move(board, my_color)
         if win_move:
             return win_move
-
+        
+        # 检查是否需要立即防守
         defend_move = self._find_winning_move(board, opponent_color)
         if defend_move:
             return defend_move
-
-        max_depth = 3   # Ensure quick decision making
-        _, best_move = minimax(board, max_depth, float('-inf'), float('inf'), True)
-
-        return best_move if best_move else self._get_random_empty_position(board)
-
+        
+        # ============================================================
+        # TODO: IMPLEMENT YOUR STRATEGY HERE
+        # ============================================================
+        # Current implementation: Simple random move
+        # 
+        # Suggestions for improvement:
+        # 1. Evaluate each candidate position's value
+        # 2. Consider forming patterns (live three, live four, etc.)
+        # 3. Block opponent's strong patterns
+        # 4. Control center positions
+        # 
+        # Available helper functions:
+        # - self._get_empty_positions_near_stones(board, distance=2)
+        # - self._count_consecutive(board, x, y, color, dx, dy)
+        # - self._check_win(board, x, y, color)
+        # ============================================================
+        
+        candidates = self._get_empty_positions_near_stones(board)
+        if candidates:
+            # TODO: Replace this with your evaluation logic
+            # Example: score each candidate and return the best one
+            return candidates[0]
+        
+        # Fallback: random empty position
+        return self._get_random_empty_position(board)
         
         # ============================================================
         # END OF STRATEGY IMPLEMENTATION

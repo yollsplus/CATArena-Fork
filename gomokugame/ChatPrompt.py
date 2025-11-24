@@ -6,40 +6,16 @@ import time
 # for each prompt, I should first create a session, then send the query
 import argparse
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--model_name", type=str, default="gpt_4_1")
-parser.add_argument("--language", type=str, default="")
-parser.add_argument("--game_env", type=str, default="gomoku")
-parser.add_argument("--game_suffix", type=str, default="gomoku")
-parser.add_argument("--game_server", type=str, default="http://127.0.0.1:9000")
-parser.add_argument("--dir_path", type=str, default="./gomoku/AI_develop")
 
-# 循环赛轮次
-parser.add_argument("--round_num", type=int, default=1)
-# round > 1时需要提供上一轮的日志和code
-parser.add_argument("--log_path", type=str, default=None)
-parser.add_argument("--last_round_dir", type=str, default=None)
+def generate_prompt(model_name="gpt_4_1", language="", game_env="gomoku", game_suffix="gomoku", 
+                   game_server="http://127.0.0.1:9000", dir_path="./gomoku/AI_develop", 
+                   round_num=1, log_path=None, last_round_dir=None):
+    
+    game_env_path = f'./{game_env}'
 
-
-args = parser.parse_args()
-
-dir_path = args.dir_path
-model_name = args.model_name
-language = args.language
-game_env = args.game_env
-game_suffix = args.game_suffix
-round_num = args.round_num
-game_server = args.game_server
-log_path = args.log_path
-last_round_dir = args.last_round_dir
-
-
-game_env_path = f'./{game_env}'
-
-
-if round_num == 1:
-    # Round 1: 基于模板开发
-    prompt_data = f'''
+    if round_num == 1:
+        # Round 1: 基于模板开发
+        prompt_data = f'''
 # Round 1: Implement Gomoku AI Strategy
 
 **CRITICAL**: You MUST use `edit_file` to modify ONLY the TODO section. DO NOT use `write_file`.
@@ -72,9 +48,9 @@ if round_num == 1:
 ✓ All functions you call are defined
 
 **Reference**: `{dir_path}/README.md` for details'''
-else:
-    # Round 2+: 基于上一轮改进
-    prompt_data = f'''
+    else:
+        # Round 2+: 基于上一轮改进
+        prompt_data = f'''
 # Round {round_num}: Improve Strategy Based on Tournament Results
 
 **STEP 1**: Read your v{round_num-1} strategy
@@ -113,8 +89,8 @@ edit_file('{dir_path}/ai_service.py', {{
 **Tournament Results** (analyze win/loss patterns):
 '''
 
-# 添加通用要求
-prompt_data += f'''
+    # 添加通用要求
+    prompt_data += f'''
 
 ## File Requirements
 - `{dir_path}/ai_service.py` - Main service (must accept `--port` argument)
@@ -131,22 +107,53 @@ prompt_data += f'''
 '''.strip()
 
 
-import glob
+    import glob
 
-if round_num  > 1:
-    assert os.path.exists(last_round_dir), f"上一轮的代码不存在: {last_round_dir}"
-    last_round_log_dir = glob.glob(os.path.join(log_path, f'tournament_report_history_*.json'))
-    last_round_log_dir = sorted(last_round_log_dir, key=lambda x: int(x.split('_')[-1].split('.')[0]))[-1]
-    last_round_info = glob.glob(os.path.join(log_path, f'*_arena_report_*.csv'))
-    last_round_info = sorted(last_round_info, key=lambda x: int(x.split('_')[-1].split('.')[0]))[-1]
-    assert os.path.exists(last_round_log_dir), f"上一轮的日志不存在: {last_round_log_dir}"
-    
-    prompt_data += f"\n\n## Tournament Data\n- Report: {last_round_info}\n- History: {last_round_log_dir}\n- Previous code: {last_round_dir}" 
+    if round_num  > 1:
+        assert os.path.exists(last_round_dir), f"上一轮的代码不存在: {last_round_dir}"
+        last_round_log_dir = glob.glob(os.path.join(log_path, f'tournament_report_history_*.json'))
+        last_round_log_dir = sorted(last_round_log_dir, key=lambda x: int(x.split('_')[-1].split('.')[0]))[-1]
+        last_round_info = glob.glob(os.path.join(log_path, f'*_arena_report_*.csv'))
+        last_round_info = sorted(last_round_info, key=lambda x: int(x.split('_')[-1].split('.')[0]))[-1]
+        assert os.path.exists(last_round_log_dir), f"上一轮的日志不存在: {last_round_log_dir}"
+        
+        prompt_data += f"\n\n## Tournament Data\n- Report: {last_round_info}\n- History: {last_round_log_dir}\n- Previous code: {last_round_dir}" 
 
-if language:
-    prompt_data = prompt_data + f"\n{language} is the language you should use to develop your AI service."
+    if language:
+        prompt_data = prompt_data + f"\n{language} is the language you should use to develop your AI service."
 
-print(prompt_data)
+    return prompt_data
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_name", type=str, default="gpt_4_1")
+    parser.add_argument("--language", type=str, default="")
+    parser.add_argument("--game_env", type=str, default="gomoku")
+    parser.add_argument("--game_suffix", type=str, default="gomoku")
+    parser.add_argument("--game_server", type=str, default="http://127.0.0.1:9000")
+    parser.add_argument("--dir_path", type=str, default="./gomoku/AI_develop")
+
+    # 循环赛轮次
+    parser.add_argument("--round_num", type=int, default=1)
+    # round > 1时需要提供上一轮的日志和code
+    parser.add_argument("--log_path", type=str, default=None)
+    parser.add_argument("--last_round_dir", type=str, default=None)
+
+
+    args = parser.parse_args()
+
+    print(generate_prompt(
+        model_name=args.model_name,
+        language=args.language,
+        game_env=args.game_env,
+        game_suffix=args.game_suffix,
+        game_server=args.game_server,
+        dir_path=args.dir_path,
+        round_num=args.round_num,
+        log_path=args.log_path,
+        last_round_dir=args.last_round_dir
+    ))
+
 
 
 

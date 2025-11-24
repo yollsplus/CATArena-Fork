@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Agent 学习能力验证脚本
+========================================
+让同一个 Agent 的不同版本 (v1, v2, v3...) 两两对战，评估学习效果
+    python validate_agent.py --agent gpt-4o_ai --game gomoku
+    python validate_agent.py --agent gpt-4o_ai --game gomoku --versions 1 2 3
+    python validate_agent.py --agent gpt-4o_ai --game gomoku --rounds 5
+"""
