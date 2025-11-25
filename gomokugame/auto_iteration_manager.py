@@ -933,7 +933,13 @@ class AutoIterationManager:
                 print("=" * 60)
                 
                 # 查找报告文件
-                reports_dir = self.base_dir / f"{game}_Arena/reports"
+                # arena.py 默认在当前工作目录下的 reports 目录保存报告
+                # 而 auto_iteration_manager.py 运行时 CWD 是 gomokugame
+                reports_dir = self.base_dir / "reports"
+                if not reports_dir.exists():
+                    # 兼容旧逻辑，如果根目录没有，再找 Arena 目录
+                    reports_dir = self.base_dir / f"{game}_Arena/reports"
+                
                 csv_reports = list(reports_dir.glob("tournament_report_tournament_*.csv"))
                 json_reports = list(reports_dir.glob("tournament_report_history_*.json"))
                 
