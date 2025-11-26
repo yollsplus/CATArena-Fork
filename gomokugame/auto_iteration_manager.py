@@ -215,9 +215,19 @@ class AutoIterationManager:
             print("=" * 80)
             
             try:
+                # Global Prompt Generation (Round 2+)
+                global_prompt = ""
+                if round_num > 1 and self.config['iteration'].get('use_llm_summary', False):
+                    print(f"\n[Global] 生成 Round {round_num} 全局分析提示词...")
+                    global_prompt = self._generate_global_prompt(round_num)
+                    if global_prompt:
+                        print(f"✅ 全局提示词生成成功 ({len(global_prompt)} 字符)")
+                    else:
+                        print("⚠️  全局提示词生成失败")
+
                 # Process each agent
                 for agent_config in self.agents_config:
-                    self._process_agent_round(agent_config, round_num)
+                    self._process_agent_round(agent_config, round_num, global_prompt)
                 
                 # Run Arena
                 if self._should_run_arena(round_num):
@@ -242,7 +252,37 @@ class AutoIterationManager:
         print(f"详细日志: {self.output_dir}/iteration_log.json")
         print("=" * 80)
 
-    def _process_agent_round(self, agent_config: Dict, round_num: int):
+    def _generate_global_prompt(self, round_num: int) -> str:
+        """
+        生成全局统一的提示词 (Round 2+)
+        """
+        # 收集所有 Agent 的上一轮代码路径
+        agent_dirs = {}
+        for agent_config in self.agents_config:
+            agent_model = agent_config['model']
+            # 查找上一轮的代码路径: AI_competitors/gomoku/<model>/v<round-1>
+            prev_round = round_num - 1
+            ai_path = self.base_dir / "AI_competitors" / self.config['game'] / f"{agent_model}_ai" / f"v{prev_round}"
+            if ai_path.exists():
+                agent_dirs[agent_model] = str(ai_path)
+        
+        if not agent_dirs:
+            print("⚠️  未找到上一轮的任何 Agent 代码")
+            return ""
+
+        llm_config = self.config['iteration']['llm_summary_config']
+        
+        return ChatPromptWithLlm.generate_global_prompt_with_llm(
+            round_num=round_num,
+            log_path='./reports',
+            agent_dirs=agent_dirs,
+            llm_api_url=llm_config['api_url'],
+            llm_api_key=llm_config['api_key'],
+            llm_model=llm_config['model'],
+            is_concise=True
+        )
+
+    def _process_agent_round(self, agent_config: Dict, round_num: int, global_prompt: str = ""):
         agent_model = agent_config['model']
         print(f"\n>>> 处理 Agent: {agent_model} (Round {round_num})")
         
@@ -257,7 +297,7 @@ class AutoIterationManager:
                 print(f"   请先运行 'python tools.py init' 初始化工作区")
                 return
 
-        prompt = self._generate_prompt(agent_config, round_num, workspace_dir)
+        prompt = self._generate_prompt(agent_config, round_num, workspace_dir, global_prompt)
         if not prompt: return
 
         prompt_file = self._save_prompt(prompt, round_num, agent_model)
@@ -267,7 +307,7 @@ class AutoIterationManager:
         
         self._auto_deploy_code(agent_config, round_num, workspace_dir)
     
-    def _generate_prompt(self, agent_config: Dict, round_num: int, workspace_dir: Path) -> str:
+    def _generate_prompt(self, agent_config: Dict, round_num: int, workspace_dir: Path, global_prompt: str = "") -> str:
         """
         生成提示词
         """
@@ -275,6 +315,12 @@ class AutoIterationManager:
         print(f"\n[1/6]生成 Round {round_num} 提示词 ({agent_model})...")
         
         prompt = ""
+        error_context = ""
+
+        if round_num > 1:
+            error_context = self._check_previous_round_errors(round_num, agent_model)
+            if error_context:
+                print(f"⚠️  发现上一轮错误，已添加到提示词: {error_context[:50]}...")
         
         if round_num == 1:
             #使用ChatPrompt.py
@@ -286,34 +332,42 @@ class AutoIterationManager:
                 dir_path=str(workspace_dir)
             )
         else:
-            # Previous round code is in the same workspace
-            prev_round_dir = workspace_dir
-            
-            #Round2+使用ChatPromptWithLlm.py分析上一轮代码和对局记录
-            use_llm = self.config['iteration'].get('use_llm_summary', False)
-            if use_llm:
-                llm_config = self.config['iteration']['llm_summary_config']
-                prompt = ChatPromptWithLlm.generate_prompt_with_llm(
-                    model_name=f"{agent_model}_ai_v{round_num}",
-                    round_num=round_num,
-                    log_path='./reports',
-                    last_round_dir=str(prev_round_dir),
-                    llm_api_url=llm_config['api_url'],
-                    llm_api_key=llm_config['api_key'],
-                    llm_model=llm_config['model'],
-                    dir_path=str(workspace_dir),
-                    is_concise=True  #使用简洁模式，只输出分析内容
-                )
-            else: 
-                prompt = ChatPrompt.generate_prompt(
-                    model_name=f"{agent_model}_ai_v{round_num}",
-                    round_num=round_num,
-                    log_path='./reports',
-                    last_round_dir=str(prev_round_dir),
-                    game_env=self.config['game'],
-                    game_suffix=self.config['game'],
-                    dir_path=str(workspace_dir)
-                )
+            # Round 2+
+            if global_prompt:
+                # 使用全局提示词
+                prompt = global_prompt
+                # 仍然需要添加错误上下文（如果是针对特定 Agent 的运行时错误）
+                if error_context:
+                    prompt = f"!!! URGENT FIX REQUIRED !!!\n{error_context}\n\n" + prompt
+            else:
+                # Fallback to individual generation (if global failed or not used)
+                prev_round_dir = workspace_dir
+                use_llm = self.config['iteration'].get('use_llm_summary', False)
+                if use_llm:
+                    llm_config = self.config['iteration']['llm_summary_config']
+                    prompt = ChatPromptWithLlm.generate_prompt_with_llm(
+                        model_name=f"{agent_model}_ai_v{round_num}",
+                        round_num=round_num,
+                        log_path='./reports',
+                        last_round_dir=str(prev_round_dir),
+                        llm_api_url=llm_config['api_url'],
+                        llm_api_key=llm_config['api_key'],
+                        llm_model=llm_config['model'],
+                        dir_path=str(workspace_dir),
+                        is_concise=True,
+                        error_context=error_context
+                    )
+                else: 
+                    prompt = ChatPrompt.generate_prompt(
+                        model_name=f"{agent_model}_ai_v{round_num}",
+                        round_num=round_num,
+                        log_path='./reports',
+                        last_round_dir=str(prev_round_dir),
+                        game_env=self.config['game'],
+                        game_suffix=self.config['game'],
+                        dir_path=str(workspace_dir),
+                        error_context=error_context
+                    )
         
         if not prompt:
             print("警告: 提示词为空")
@@ -322,6 +376,74 @@ class AutoIterationManager:
         print(f"提示词已生成({len(prompt)}字符)")
         
         return prompt
+
+    def _check_previous_round_errors(self, round_num: int, agent_model: str) -> str:
+        """
+        检查上一轮是否有 ai_error
+        """
+        if round_num <= 1:
+            return ""
+            
+        prev_round = round_num - 1
+        
+        # 查找上一轮的日志记录
+        prev_log = next((log for log in self.iteration_log if log['round'] == prev_round), None)
+        
+        if not prev_log:
+            # 尝试从文件加载
+            log_file = self.output_dir / "iteration_log.json"
+            if log_file.exists():
+                try:
+                    with open(log_file, 'r', encoding='utf-8') as f:
+                        logs = json.load(f)
+                        prev_log = next((log for log in logs if log['round'] == prev_round), None)
+                except:
+                    pass
+        
+        if not prev_log:
+            return ""
+            
+        json_report_path = prev_log.get('arena_reports', {}).get('json')
+        if not json_report_path or not os.path.exists(json_report_path):
+            return ""
+            
+        try:
+            with open(json_report_path, 'r', encoding='utf-8') as f:
+                report = json.load(f)
+                
+            detailed_results = report.get('detailed_results', [])
+            target_ai_id = f"{agent_model}_ai_v{prev_round}"
+            
+            error_count = 0
+            error_reasons = set()
+            
+            for game in detailed_results:
+                # 检查是否是该 AI 参与的游戏
+                if game['player_black'] == target_ai_id or game['player_white'] == target_ai_id:
+                    end_reason = game.get('end_reason')
+                    # 检查是否是异常结束 (ai_error, error, timeout)
+                    # 注意：如果是 timeout，需要确认是不是该 AI 超时
+                    if end_reason in ['ai_error', 'error']:
+                        error_count += 1
+                        error_reasons.add(end_reason)
+                    elif end_reason == 'timeout':
+                        # 简单的判断：如果赢家不是自己，可能是自己超时
+                        if game['winner'] != target_ai_id:
+                             error_count += 1
+                             error_reasons.add('timeout')
+
+            if error_count > 0:
+                return (
+                    f"CRITICAL WARNING: In the previous round (v{prev_round}), your AI failed in {error_count} games "
+                    f"due to runtime errors ({', '.join(error_reasons)}). "
+                    f"This often indicates syntax errors (like IndentationError) or runtime exceptions that crashed the service. "
+                    f"Please carefully check your code structure, especially indentation and method definitions."
+                )
+                
+        except Exception as e:
+            print(f"检查上一轮错误时出错: {e}")
+            
+        return ""
     
     def _save_prompt(self, prompt: str, round_num: int, agent_model: str) -> Path:
         print(f"\n[2/6] 保存提示词...")

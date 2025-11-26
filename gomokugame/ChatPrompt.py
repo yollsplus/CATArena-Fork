@@ -9,7 +9,7 @@ import argparse
 
 def generate_prompt(model_name="gpt_4_1", language="", game_env="gomoku", game_suffix="gomoku", 
                    game_server="http://127.0.0.1:9000", dir_path="./gomoku/AI_develop", 
-                   round_num=1, log_path=None, last_round_dir=None):
+                   round_num=1, log_path=None, last_round_dir=None, error_context=None):
     
     game_env_path = f'./{game_env}'
 
@@ -85,6 +85,9 @@ replace_python_method(
 
 **Tournament Results** (analyze win/loss patterns):
 '''
+
+    if error_context:
+        prompt_data = f"!!! URGENT FIX REQUIRED !!!\n{error_context}\n\n" + prompt_data
 
     # 添加通用要求
     prompt_data += f'''
