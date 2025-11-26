@@ -170,7 +170,15 @@ class AutoIterationManager:
         self.base_dir = Path(__file__).parent
         self.current_round = 1
         self.iteration_log = []
-        self.chat_history = []  # 存储对话历史，实现多轮对话上下文保持
+        
+        # Support multiple agents
+        if 'agents' in self.config:
+            self.agents_config = self.config['agents']
+        else:
+            # Backward compatibility
+            self.agents_config = [self.config['agent']]
+            
+        self.chat_histories = {agent['model']: [] for agent in self.agents_config}
         
         self.output_dir = self.base_dir / "iteration_contents"
         self.output_dir.mkdir(exist_ok=True)
@@ -178,11 +186,11 @@ class AutoIterationManager:
         self.service_manager = ServiceManager(self.base_dir)
         
         print("=" * 80)
-        print("CATArena 自动化迭代管理器")
+        print("CATArena 自动化迭代管理器 (Multi-Agent)")
         print("=" * 80)
         print(f"配置文件: {config_path}")
         print(f"游戏类型: {self.config['game']}")
-        print(f"Agent类型: {self.config['agent']['type']}")
+        print(f"开发Agent: {[a['model'] for a in self.agents_config]}")
         print(f"最大轮次: {self.config['iteration']['max_rounds']}")
         print(f"输出目录: {self.output_dir}")
         print("=" * 80)
@@ -196,8 +204,6 @@ class AutoIterationManager:
         1. Round 1: 生成初始提示词 → 发送给Agent → 自动部署代码 → 运行对战
         2. Round 2+: 分析上轮日志 → 生成增强提示词 → 发送给Agent → 自动部署代码 → 运行对战
         3. 重复直到达到最大轮次
-        自动部署:Agent生成的代码在 ./gomoku/AI_develop/ 中，
-                  脚本会自动复制到 AI_competitors/gomoku/round_N/<ai_name>/gomoku_v1/
         """
         max_rounds = self.config['iteration']['max_rounds']
         
@@ -209,19 +215,14 @@ class AutoIterationManager:
             print("=" * 80)
             
             try:
-                prompt = self._generate_prompt(round_num)
-                prompt_file = self._save_prompt(prompt, round_num)
-                agent_response = self._send_to_agent_with_validation(prompt, round_num)
-                self._save_agent_response(agent_response, round_num)
-                deploy_success = self._auto_deploy_code(round_num)
-                if not deploy_success:
-                    print(f"代码部署失败，跳过 Round{round_num}对战")
-                    continue
+                # Process each agent
+                for agent_config in self.agents_config:
+                    self._process_agent_round(agent_config, round_num)
+                
+                # Run Arena
                 if self._should_run_arena(round_num):
                     arena_result = self._run_arena(round_num)
-                    
-
-                    self._log_round_result(round_num, prompt_file, agent_response, arena_result)
+                    self._log_round_result(round_num, arena_result)
                 else:
                     print(f"Round{round_num}没有可用的AI")
 
@@ -240,53 +241,78 @@ class AutoIterationManager:
         print("迭代流程完成!")
         print(f"详细日志: {self.output_dir}/iteration_log.json")
         print("=" * 80)
+
+    def _process_agent_round(self, agent_config: Dict, round_num: int):
+        agent_model = agent_config['model']
+        print(f"\n>>> 处理 Agent: {agent_model} (Round {round_num})")
+        
+        # Prepare workspace
+        workspace_dir = self.base_dir / "gomoku" / "AI_develop_workspace" / f"{agent_model}_ai"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        
+        if round_num == 1:
+            # Check if workspace is initialized
+            if not any(workspace_dir.iterdir()):
+                print(f"⚠️  警告: 工作区为空: {workspace_dir}")
+                print(f"   请先运行 'python tools.py init' 初始化工作区")
+                return
+
+        prompt = self._generate_prompt(agent_config, round_num, workspace_dir)
+        if not prompt: return
+
+        prompt_file = self._save_prompt(prompt, round_num, agent_model)
+        
+        agent_response = self._send_to_agent_with_validation(agent_config, prompt, round_num, workspace_dir)
+        self._save_agent_response(agent_response, round_num, agent_model)
+        
+        self._auto_deploy_code(agent_config, round_num, workspace_dir)
     
-    def _generate_prompt(self, round_num: int) -> str:
+    def _generate_prompt(self, agent_config: Dict, round_num: int, workspace_dir: Path) -> str:
         """
         生成提示词
         """
-        print(f"\n[1/6]生成 Round {round_num} 提示词...")
+        agent_model = agent_config['model']
+        print(f"\n[1/6]生成 Round {round_num} 提示词 ({agent_model})...")
         
         prompt = ""
         
         if round_num == 1:
             #使用ChatPrompt.py
             prompt = ChatPrompt.generate_prompt(
-                model_name=f"{self.config['agent']['model']}_ai",
+                model_name=f"{agent_model}_ai",
                 round_num=1,
                 game_env=self.config['game'],
-                game_suffix=self.config['game']
+                game_suffix=self.config['game'],
+                dir_path=str(workspace_dir)
             )
         else:
-            #先确认AI_develop里agent在上一轮里完成的代码
-            prev_round_dir = self.base_dir / f"{self.config['game']}/AI_develop"
-            if not prev_round_dir.exists():
-                print(f"\n错误:在{prev_round_dir}下找不到 AI_develop目录")
-                print(f"\n提示:Agent 响应已保存在 ./auto_iteration_output/round_{round_num-1}_agent_response.json")
-                return ""
+            # Previous round code is in the same workspace
+            prev_round_dir = workspace_dir
             
             #Round2+使用ChatPromptWithLlm.py分析上一轮代码和对局记录
             use_llm = self.config['iteration'].get('use_llm_summary', False)
             if use_llm:
                 llm_config = self.config['iteration']['llm_summary_config']
                 prompt = ChatPromptWithLlm.generate_prompt_with_llm(
-                    model_name=f"{self.config['agent']['model']}_ai_v{round_num}",
+                    model_name=f"{agent_model}_ai_v{round_num}",
                     round_num=round_num,
                     log_path='./reports',
                     last_round_dir=str(prev_round_dir),
                     llm_api_url=llm_config['api_url'],
                     llm_api_key=llm_config['api_key'],
                     llm_model=llm_config['model'],
+                    dir_path=str(workspace_dir),
                     is_concise=True  #使用简洁模式，只输出分析内容
                 )
             else: 
                 prompt = ChatPrompt.generate_prompt(
-                    model_name=f"{self.config['agent']['model']}_ai_v{round_num}",
+                    model_name=f"{agent_model}_ai_v{round_num}",
                     round_num=round_num,
                     log_path='./reports',
                     last_round_dir=str(prev_round_dir),
                     game_env=self.config['game'],
-                    game_suffix=self.config['game']
+                    game_suffix=self.config['game'],
+                    dir_path=str(workspace_dir)
                 )
         
         if not prompt:
@@ -297,17 +323,17 @@ class AutoIterationManager:
         
         return prompt
     
-    def _save_prompt(self, prompt: str, round_num: int) -> Path:
+    def _save_prompt(self, prompt: str, round_num: int, agent_model: str) -> Path:
         print(f"\n[2/6] 保存提示词...")
         
-        prompt_file = self.output_dir / f"round_{round_num}_prompt.txt"
+        prompt_file = self.output_dir / f"round_{round_num}_{agent_model}_prompt.txt"
         with open(prompt_file, 'w', encoding='utf-8') as f:
             f.write(prompt)
         
         print(f"提示词已保存到: {prompt_file}")
         return prompt_file
     
-    def _send_to_agent_with_validation(self, initial_prompt: str, round_num: int) -> Dict[str, Any]:
+    def _send_to_agent_with_validation(self, agent_config: Dict, initial_prompt: str, round_num: int, workspace_dir: Path) -> Dict[str, Any]:
         """
         发送提示词给Agent，并进行代码语法检查循环
         """
@@ -320,11 +346,10 @@ class AutoIterationManager:
                 print(f"\n[3/6]修复尝试 {attempt}/{max_retries}...")
             
             # 发送请求
-            last_response = self._send_to_agent(current_prompt, round_num)
+            last_response = self._send_to_agent(agent_config, current_prompt, round_num)
             
             # 检查语法
-            ai_develop_dir = self.base_dir / "gomoku" / "AI_develop"
-            syntax_error = self._check_code_syntax(ai_develop_dir)
+            syntax_error = self._check_code_syntax(workspace_dir)
             
             if syntax_error:
                 print(f"检测到语法错误 (尝试 {attempt + 1}/{max_retries + 1}):")
@@ -342,7 +367,7 @@ class AutoIterationManager:
                     return last_response
 
             # 语法检查通过，进行运行时检查
-            runtime_error = self._check_code_runtime(ai_develop_dir)
+            runtime_error = self._check_code_runtime(workspace_dir)
             
             if not runtime_error:
                 if attempt > 0:
@@ -469,23 +494,23 @@ class AutoIterationManager:
                 return f"File: {py_file.name}\nError: {str(e)}"
         return None
 
-    def _send_to_agent(self, prompt: str, round_num: int) -> Dict[str, Any]:
+    def _send_to_agent(self, agent_config: Dict, prompt: str, round_num: int) -> Dict[str, Any]:
         """
         发送提示词给Agent
         Returns:
             Agent的响应
         """
-        print(f"\n[3/6] 发送提示词给Agent ({self.config['agent']['type']})...")
+        print(f"\n[3/6] 发送提示词给Agent ({agent_config['type']})...")
         
-        agent_type = self.config['agent']['type']
+        agent_type = agent_config['type']
         
         try:
             if agent_type == 'openai':
-                response = self._send_to_openai(prompt)
+                response = self._send_to_openai(agent_config, prompt)
             elif agent_type == 'anthropic':
-                response = self._send_to_anthropic(prompt)
+                response = self._send_to_anthropic(agent_config, prompt)
             elif agent_type == 'custom':
-                response = self._send_to_custom(prompt)
+                response = self._send_to_custom(agent_config, prompt)
             else:
                 raise ValueError(f"不支持的Agent类型: {agent_type}")
             
@@ -503,64 +528,59 @@ class AutoIterationManager:
                 "timestamp": datetime.now().isoformat()
             }
     
-    def _send_to_openai(self, prompt: str) -> Dict[str, Any]:
+    def _send_to_openai(self, agent_config: Dict, prompt: str) -> Dict[str, Any]:
         """通过OpenAI API发送（支持 MCP 工具调用）"""
-        use_mcp = self.config['agent'].get('use_mcp', False)
+        use_mcp = agent_config.get('use_mcp', False)
+        agent_model = agent_config['model']
         
+        # Ensure history has system prompt
+        if not self.chat_histories[agent_model]:
+             self.chat_histories[agent_model] = [{
+                "role": "system",
+                "content": "You are an expert AI programming assistant. You have access to file system tools. You MUST use 'replace_python_method' (preferred) or 'edit_file' to implement the requirements. Do not just output code in the chat."
+            }]
+
         if use_mcp:
             # 使用 MCP 集成
             from mcp_integration import run_agent_with_mcp_sync
             
-            max_iterations = self.config['agent'].get('mcp_max_iterations', 15)
+            max_iterations = agent_config.get('mcp_max_iterations', 15)
             
             # 传入当前的对话历史
             result = run_agent_with_mcp_sync(
                 prompt=prompt,
-                api_key=self.config['agent']['api_key'],
-                api_url=self.config['agent'].get('base_url', 'https://api.openai.com/v1'),
-                model=self.config['agent']['model'],
+                api_key=agent_config['api_key'],
+                api_url=agent_config.get('base_url', 'https://api.openai.com/v1'),
+                model=agent_model,
                 workspace_root=self.base_dir,
                 max_iterations=max_iterations,
-                history=self.chat_history  # 传入历史
+                history=self.chat_histories[agent_model]  # 传入历史
             )
             
             # 更新对话历史
             if 'history' in result:
-                self.chat_history = result['history']
-                print(f"   对话历史已更新，当前长度: {len(self.chat_history)}")
+                self.chat_histories[agent_model] = result['history']
+                print(f"   对话历史已更新，当前长度: {len(self.chat_histories[agent_model])}")
             
             result['timestamp'] = datetime.now().isoformat()
             return result
         else:
             
             client = OpenAI(
-                api_key=self.config['agent']['api_key'],
-                base_url=self.config['agent'].get('base_url')
+                api_key=agent_config['api_key'],
+                base_url=agent_config.get('base_url')
             )
             
             # 构建消息列表
-            if not self.chat_history:
-                # Round 1: 初始化
-                messages = [
-                    {
-                        "role": "system",
-                        "content": "You are an expert AI programming assistant. Generate complete, production-ready code."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
-            else:
-                # Round 2+: 追加新消息
-                messages = list(self.chat_history)
-                messages.append({
-                    "role": "user",
-                    "content": prompt
-                })
+            # History already initialized above
+            messages = list(self.chat_histories[agent_model])
+            messages.append({
+                "role": "user",
+                "content": prompt
+            })
             
             response = client.chat.completions.create(
-                model=self.config['agent']['model'],
+                model=agent_model,
                 messages=messages,
                 temperature=0.7,
                 max_tokens=8000
@@ -568,8 +588,8 @@ class AutoIterationManager:
             
             # 更新历史
             messages.append(response.choices[0].message.model_dump())
-            self.chat_history = messages
-            print(f"   对话历史已更新，当前长度: {len(self.chat_history)}")
+            self.chat_histories[agent_model] = messages
+            print(f"   对话历史已更新，当前长度: {len(self.chat_histories[agent_model])}")
             
             return {
                 "content": response.choices[0].message.content,
@@ -578,52 +598,53 @@ class AutoIterationManager:
                 "timestamp": datetime.now().isoformat()
             }
     
-    def _send_to_anthropic(self, prompt: str) -> Dict[str, Any]:
+    def _send_to_anthropic(self, agent_config: Dict, prompt: str) -> Dict[str, Any]:
         """通过Anthropic API发送（支持 MCP 工具调用）"""
-        use_mcp = self.config['agent'].get('use_mcp', False)
+        use_mcp = agent_config.get('use_mcp', False)
+        agent_model = agent_config['model']
         
         if use_mcp:
             # 使用 MCP 集成
             from mcp_integration import run_agent_with_mcp_sync
             
-            max_iterations = self.config['agent'].get('mcp_max_iterations', 15)
+            max_iterations = agent_config.get('mcp_max_iterations', 15)
             
             result = run_agent_with_mcp_sync(
                 prompt=prompt,
-                api_key=self.config['agent']['api_key'],
+                api_key=agent_config['api_key'],
                 api_url='https://api.anthropic.com',  # Anthropic API
-                model=self.config['agent']['model'],
+                model=agent_model,
                 workspace_root=self.base_dir,
                 max_iterations=max_iterations,
-                history=self.chat_history
+                history=self.chat_histories[agent_model]
             )
             
             if 'history' in result:
-                self.chat_history = result['history']
+                self.chat_histories[agent_model] = result['history']
             
             result['timestamp'] = datetime.now().isoformat()
             return result
         else:
             
             client = anthropic.Anthropic(
-                api_key=self.config['agent']['api_key']
+                api_key=agent_config['api_key']
             )
             
-            if not self.chat_history:
+            if not self.chat_histories[agent_model]:
                 messages = [{"role": "user", "content": prompt}]
             else:
-                messages = list(self.chat_history)
+                messages = list(self.chat_histories[agent_model])
                 messages.append({"role": "user", "content": prompt})
             
             response = client.messages.create(
-                model=self.config['agent']['model'],
+                model=agent_model,
                 max_tokens=8000,
                 messages=messages
             )
             
             # 更新历史
             messages.append({"role": "assistant", "content": response.content[0].text})
-            self.chat_history = messages
+            self.chat_histories[agent_model] = messages
             
             return {
                 "content": response.content[0].text,
@@ -635,28 +656,17 @@ class AutoIterationManager:
                 "timestamp": datetime.now().isoformat()
             }
     
-    def _send_to_custom(self, prompt: str) -> Dict[str, Any]:
+    def _send_to_custom(self, agent_config: Dict, prompt: str) -> Dict[str, Any]:
         """
         通过自定义API发送
-        
-        配置示例:
-        {
-            "agent": {
-                "type": "custom",
-                "api_url": "http://your-agent-api.com/generate",
-                "api_key": "xxx",
-                "headers": {...},
-                "payload_template": {...}
-            }
-        }
         """
         import requests
         
-        url = self.config['agent']['api_url']
-        headers = self.config['agent'].get('headers', {})
-        headers['Authorization'] = f"Bearer {self.config['agent']['api_key']}"
+        url = agent_config['api_url']
+        headers = agent_config.get('headers', {})
+        headers['Authorization'] = f"Bearer {agent_config['api_key']}"
         
-        payload = self.config['agent'].get('payload_template', {})
+        payload = agent_config.get('payload_template', {})
         payload['prompt'] = prompt
         
         response = requests.post(url, json=payload, headers=headers, timeout=300)
@@ -668,24 +678,22 @@ class AutoIterationManager:
             "timestamp": datetime.now().isoformat()
         }
     
-    def _save_agent_response(self, response: Dict[str, Any], round_num: int):
+    def _save_agent_response(self, response: Dict[str, Any], round_num: int, agent_model: str):
         """保存Agent响应"""
         print(f"\n[4/6] 保存Agent响应...")
         
-        response_file = self.output_dir / f"round_{round_num}_agent_response.json"
+        response_file = self.output_dir / f"round_{round_num}_{agent_model}_response.json"
         with open(response_file, 'w', encoding='utf-8') as f:
             json.dump(response, f, indent=2, ensure_ascii=False)
         
         print(f"✅ Agent响应已保存到: {response_file}")
     
-    def _auto_deploy_code(self, round_num: int) -> bool:
+    def _auto_deploy_code(self, agent_config: Dict, round_num: int, source_dir: Path) -> bool:
         """
-        自动部署代码：从 ./gomoku/AI_develop/ 复制到 AI_competitors/gomoku/round_N/<model_name>/v<round_num>/
+        自动部署代码：从 workspace 复制到 AI_competitors/gomoku/round_N/<model_name>/v<round_num>/
         """
-        print(f"\n[5/6] 自动部署代码...")
-        
-        # 源目录：Agent 生成代码的位置
-        source_dir = self.base_dir / "gomoku" / "AI_develop"
+        agent_model = agent_config['model']
+        print(f"\n[5/6] 自动部署代码 ({agent_model})...")
         
         if not source_dir.exists():
             print(f"⚠️  错误: 源目录不存在: {source_dir}")
@@ -702,7 +710,7 @@ class AutoIterationManager:
             print(f"   - {f.name}")
         
         # 新结构：AI_competitors/gomoku/<model_name>/v<round_num>/
-        model_name = f"{self.config['agent']['model']}_ai"
+        model_name = f"{agent_model}_ai"
         target_base = self.base_dir / "AI_competitors" / self.config['game'] / model_name
         target_dir = target_base / f"v{round_num}"
         
@@ -795,7 +803,9 @@ class AutoIterationManager:
             
             # 3. 启动所有 AI 服务
             success_count = 0
-            target_model = self.config['agent']['model']  # e.g. "gpt-4o"
+            
+            # 获取所有正在开发的模型名称
+            developing_models = [a['model'] for a in self.agents_config]
             
             for ai in ais:
                 ai_id = ai['ai_id']
@@ -803,13 +813,15 @@ class AutoIterationManager:
                 ai_name = ai['ai_name']
                 
                 # 动态更新迭代 AI 的 ID 和 Name
-                # 如果 ai_id 包含我们的模型名，说明这是我们要迭代的 AI
-                if target_model in ai_id:
-                    # 强制更新为当前轮次版本
-                    new_ai_id = f"{target_model}_ai_v{round_num}"
-                    print(f"   🔄 动态更新 AI 版本: {ai_id} -> {new_ai_id}")
-                    ai_id = new_ai_id
-                    ai_name = f"{target_model.upper()} AI v{round_num}"
+                # 检查 ai_id 是否包含任何一个正在开发的模型名
+                for target_model in developing_models:
+                    if target_model in ai_id:
+                        # 强制更新为当前轮次版本
+                        new_ai_id = f"{target_model}_ai_v{round_num}"
+                        print(f"   🔄 动态更新 AI 版本: {ai_id} -> {new_ai_id}")
+                        ai_id = new_ai_id
+                        ai_name = f"{target_model.upper()} AI v{round_num}"
+                        break
                 
                 # 查找 AI 代码路径
                 ai_path = self._find_ai_path(ai_id, round_num)
@@ -909,12 +921,15 @@ class AutoIterationManager:
             print(f"每对AI对战轮数: {rounds_per_match}")
             print(f"参赛AI数量: {len(selected_ais)}")
             
+            developing_models = [a['model'] for a in self.agents_config]
+            
             for ai in selected_ais:
                 # 动态更新迭代 AI 的 ID 和 Name
-                target_model = self.config['agent']['model']
-                if target_model in ai['ai_id']:
-                    ai['ai_id'] = f"{target_model}_ai_v{round_num}"
-                    ai['ai_name'] = f"{target_model.upper()} AI v{round_num}"
+                for target_model in developing_models:
+                    if target_model in ai['ai_id']:
+                        ai['ai_id'] = f"{target_model}_ai_v{round_num}"
+                        ai['ai_name'] = f"{target_model.upper()} AI v{round_num}"
+                        break
                 
                 arena.add_ai(ai['ai_id'], ai['ai_name'], ai['port'])
                 print(f"  - {ai['ai_name']} (端口: {ai['port']})")
@@ -933,11 +948,8 @@ class AutoIterationManager:
                 print("=" * 60)
                 
                 # 查找报告文件
-                # arena.py 默认在当前工作目录下的 reports 目录保存报告
-                # 而 auto_iteration_manager.py 运行时 CWD 是 gomokugame
                 reports_dir = self.base_dir / "reports"
                 if not reports_dir.exists():
-                    # 兼容旧逻辑，如果根目录没有，再找 Arena 目录
                     reports_dir = self.base_dir / f"{game}_Arena/reports"
                 
                 csv_reports = list(reports_dir.glob("tournament_report_tournament_*.csv"))
@@ -968,15 +980,12 @@ class AutoIterationManager:
                 "error": str(e),
                 "timestamp": datetime.now().isoformat()
             }
-    def _log_round_result(self, round_num: int, prompt_file: Path, 
-                         agent_response: Dict, arena_result: Dict):
+    def _log_round_result(self, round_num: int, arena_result: Dict):
         """记录本轮结果（链接到 Arena 报告）"""
         print(f"\n[7/7] 记录 Round {round_num} 结果...")
         
         self.iteration_log.append({
             "round": round_num,
-            "prompt_file": str(prompt_file),
-            "agent_response_file": str(self.output_dir / f"round_{round_num}_agent_response.json"),
             "arena_reports": {
                 "csv": arena_result.get("csv_report"),
                 "json": arena_result.get("json_report"),

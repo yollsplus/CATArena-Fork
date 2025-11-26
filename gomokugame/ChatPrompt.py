@@ -18,34 +18,29 @@ def generate_prompt(model_name="gpt_4_1", language="", game_env="gomoku", game_s
         prompt_data = f'''
 # Round 1: Implement Gomoku AI Strategy
 
-**CRITICAL**: You MUST use `edit_file` to modify ONLY the TODO section. DO NOT use `write_file`.
+**CRITICAL**: You MUST use `replace_python_method` to implement the strategy.
 
-**Required steps (DO NOT skip)**:
-1. Call `read_text_file('{dir_path}/ai_service.py')` - read template
-2. Locate the TODO section marked with `# ====` in `select_best_move()`
-3. Call `edit_file('{dir_path}/ai_service.py')` with:
-   - `oldText`: The exact TODO section including markers
-   - `newText`: Your strategy implementation with:
-     * `candidates = self._get_empty_positions_near_stones(board)`
-     * Loop through candidates and evaluate each
-     * Return best move
-   - Keep the fallback `return self._get_random_empty_position(board)`
+**Required steps**:
+1. Call `read_text_file('{dir_path}/ai_service.py')` to understand the context.
+2. Call `replace_python_method` with:
+   - `path`: '{dir_path}/ai_service.py'
+   - `class_name`: 'GomokuAI'
+   - `method_name`: 'select_best_move'
+   - `new_code`: The COMPLETE code for the `select_best_move` method, including the `def select_best_move(...)` line and docstring.
 
-**Available helper functions**:
-- `_find_winning_move(board, color)` - find winning move
-- `_check_win(board, x, y, color)` - check if position wins
-- `_get_empty_positions_near_stones(board)` - get candidate positions
-- `_count_consecutive(board, x, y, color, dx, dy)` - count consecutive stones
+**Strategy Requirements**:
+- Implement a valid Gomoku strategy (e.g. score-based position evaluation).
+- Use helper functions: `_find_winning_move`, `_check_win`, `_get_empty_positions_near_stones`, `_count_consecutive`.
+- Ensure the code is syntactically correct.
 
 **FORBIDDEN**:
-✗ Do NOT use `write_file` (will corrupt the file)
-✗ Do NOT modify Flask endpoints or helper functions
-✗ Do NOT include undefined functions in your code
+✗ Do NOT use `write_file` (will corrupt the file).
+✗ Do NOT modify Flask endpoints or helper functions.
 
 **Success criteria**:
-✓ Use `edit_file` with exact oldText/newText
-✓ Code runs without syntax errors
-✓ All functions you call are defined
+✓ Use `replace_python_method` correctly.
+✓ Code runs without syntax errors.
+✓ All functions you call are defined.
 
 **Reference**: `{dir_path}/README.md` for details'''
     else:
@@ -63,7 +58,7 @@ read_text_file('{last_round_dir}/ai_service.py')
 - Where you lost (opening/mid-game/end-game)
 - What tactics won games
 
-**STEP 3**: Call `edit_file` to enhance your strategy - DO THIS NOW
+**STEP 3**: Call `replace_python_method` to enhance your strategy - DO THIS NOW
 
 Improvements to make:
 1. **Better threat detection** - recognize 4-in-a-row patterns earlier
@@ -72,13 +67,15 @@ Improvements to make:
 
 Example enhancement:
 ```
-edit_file('{dir_path}/ai_service.py', {{
-  "oldText": "for candidate in candidates:\\n            x, y = candidate\\n            score = 0",
-  "newText": "for candidate in candidates:\\n            x, y = candidate\\n            score = 0\\n            \\n            # Prioritize center positions\\n            center_dist = abs(x - 7) + abs(y - 7)\\n            score += (14 - center_dist) * 2"
-}})
+replace_python_method(
+    path='{dir_path}/ai_service.py',
+    class_name='GomokuAI',
+    method_name='select_best_move',
+    new_code='def select_best_move(self, board, current_player):\\n    # ... improved logic ...'
+)
 ```
 
-**YOU MUST CALL edit_file NOW**. Implement concrete improvements based on tournament performance.
+**YOU MUST CALL replace_python_method NOW**. Implement concrete improvements based on tournament performance.
 
 **CODE QUALITY REQUIREMENTS**:
 ✓ Correct Python indentation (4 spaces)

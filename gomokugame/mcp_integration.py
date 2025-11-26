@@ -42,6 +42,7 @@ class MCPFileSystemClient:
         # 读写路径：可以完全访问
         self.readwrite_paths = [
             str(self.workspace_root / "./gomoku/AI_develop"),  # Agent 开发目录（可写）
+            str(self.workspace_root / "./gomoku/AI_develop_workspace"),  # 多Agent工作区（可写）
         ]
         
         # 兼容旧接口

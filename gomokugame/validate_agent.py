@@ -363,8 +363,8 @@ class AgentValidator:
             avg_improvement = (win_rates[-1] - win_rates[0]) / (len(win_rates) - 1)
             
         print(f"\n📈 学习趋势: {learning_trend}")
-        print(f"   首版本 (v{sorted_versions[0]}) 胜率: {win_rates[0]:.2%}")
-        print(f"   末版本 (v{sorted_versions[-1]}) 胜率: {win_rates[-1]:.2%}")
+        for v, rate in zip(sorted_versions, win_rates):
+            print(f"   版本 v{v} 胜率: {rate:.2%}")
         
         return {
             "agent_name": self.agent_name,
