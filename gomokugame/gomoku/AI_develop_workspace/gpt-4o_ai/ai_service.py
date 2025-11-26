@@ -53,163 +53,65 @@ class GomokuAI:
     # 核心策略函数 - 需要你实现
     # ========================
     
-    def select_best_move(self, board: List[List[int]], my_color: int, opponent_color: int) -> Tuple[int, int]:
+    def select_best_move(self, board: List[List[int]], my_color: int, 
+                        opponent_color: int) -> Tuple[int, int]:
         """
         选择最佳走法 - 这是你需要实现的核心策略函数
-
+        
         参数:
-        board: 15x15的棋盘，0=空，1=黑，2=白
-        my_color: 我方颜色 (1或2)
-        opponent_color: 对手颜色 (1或2)
-
+            board: 15x15的棋盘，0=空，1=黑，2=白
+            my_color: 我方颜色 (1或2)
+            opponent_color: 对手颜色 (1或2)
+        
         返回:
-        (row, col): 你选择的走法位置
-
+            (row, col): 你选择的走法位置
+        
         提示:
-        - 优先考虑能立即获胜的走法
-        - 其次考虑防守对手的威胁
-        - 然后考虑建立自己的进攻态势
-        - 可以使用下面提供的辅助函数
+            - 优先考虑能立即获胜的走法
+            - 其次考虑防守对手的威胁
+            - 然后考虑建立自己的进攻态势
+            - 可以使用下面提供的辅助函数
         """
+        # 第一步下中心
         if self._is_empty_board(board):
             center = self.BOARD_SIZE // 2
             return (center, center)
-
-        # Dynamic depth adjustment based on game phase
-        def dynamic_depth_adjustment(board: List[List[int]]) -> int:
-            stones_count = sum(row.count(my_color) + row.count(opponent_color) for row in board)
-            if stones_count < 20:
-                return 2  # Early game
-            elif stones_count < 50:
-                return 3  # Mid game
-            else:
-                return 4  # Late game
-
-        # Minimax algorithm with Alpha-Beta pruning
-        def minimax(board: List[List[int]], depth: int, alpha: int, beta: int, maximizing_player: bool) -> Tuple[int, Optional[Tuple[int, int]]]:
-            if depth == 0 or self._is_terminal_state(board):
-                return self._evaluate_board(board, my_color), None
-
-            best_move = None
-            if maximizing_player:
-                max_eval = -float('inf')
-                for move in self._get_empty_positions_near_stones(board):
-                    x, y = move
-                    board[x][y] = my_color
-                    eval = minimax(board, depth - 1, alpha, beta, False)[0]
-                    board[x][y] = self.EMPTY
-                    if eval > max_eval:
-                        max_eval = eval
-                        best_move = move
-                    alpha = max(alpha, eval)
-                    if beta <= alpha:
-                        break
-                return max_eval, best_move
-            else:
-                min_eval = float('inf')
-                for move in self._get_empty_positions_near_stones(board):
-                    x, y = move
-                    board[x][y] = opponent_color
-                    eval = minimax(board, depth - 1, alpha, beta, True)[0]
-                    board[x][y] = self.EMPTY
-                    if eval < min_eval:
-                        min_eval = eval
-                        best_move = move
-                    beta = min(beta, eval)
-                    if beta <= alpha:
-                        break
-                return min_eval, best_move
-
-        # Get the best move using adjusted minimax
-        search_depth = dynamic_depth_adjustment(board)
-        _, best_move = minimax(board, search_depth, -float('inf'), float('inf'), True)
-        if best_move:
-            return best_move
-
+        
+        # 检查能否立即获胜
+        win_move = self._find_winning_move(board, my_color)
+        if win_move:
+            return win_move
+        
+        # 检查是否需要立即防守
+        defend_move = self._find_winning_move(board, opponent_color)
+        if defend_move:
+            return defend_move
+        
+        # ============================================================
+        # TODO: IMPLEMENT YOUR STRATEGY HERE
+        # ============================================================
+        # Current implementation: Simple random move
+        # 
+        # Suggestions for improvement:
+        # 1. Evaluate each candidate position's value
+        # 2. Consider forming patterns (live three, live four, etc.)
+        # 3. Block opponent's strong patterns
+        # 4. Control center positions
+        # 
+        # Available helper functions:
+        # - self._get_empty_positions_near_stones(board, distance=2)
+        # - self._count_consecutive(board, x, y, color, dx, dy)
+        # - self._check_win(board, x, y, color)
+        # ============================================================
+        
+        candidates = self._get_empty_positions_near_stones(board)
+        if candidates:
+            # TODO: Replace this with your evaluation logic
+            # Example: score each candidate and return the best one
+            return candidates[0]
+        
         # Fallback: random empty position
         return self._get_random_empty_position(board)
-
-
-    # Adding pattern recognition in the evaluation
-
-    def _evaluate_board(self, board: List[List[int]], color: int) -> int:
-        score = 0
-        for x in range(self.BOARD_SIZE):
-            for y in range(self.BOARD_SIZE):
-                if board[x][y] == color:
-                    # Pattern recognition for strategic importance
-                    score += self._pattern_recognition(board, x, y, color)
-        return score
-
-    def _pattern_recognition(self, board: List[List[int]], x: int, y: int, color: int) -> int:
-        """Enhanced pattern recognition for strategic scoring"""
-        opponent_color = self.BLACK if color == self.WHITE else self.WHITE
-        score = 0
-        # Recognize open-four and open-three patterns
-        for dx, dy in self.DIRECTIONS:
-            line = self._get_line(board, x, y, dx, dy)
-            if "11110" in line:
-                score += 1000  # Open four
-            elif "01110" in line or "010110" in line:
-                score += 500  # Open three
-        return score
-
-
-    def _get_line(self, board: List[List[int]], x: int, y: int, dx: int, dy: int) -> str:
-        """Get a string representation of a line starting from (x, y) moving in direction (dx, dy)"""
-        line = ""
-        for i in range(-4, 5):  # Scan a line segment
-            nx, ny = x + i*dx, y + i*dy
-            if 0 <= nx < self.BOARD_SIZE and 0 <= ny < self.BOARD_SIZE:
-                line += str(board[nx][ny])
-            else:
-                line += "#"  # Out of bounds
-        return line
-
-    def _is_terminal_state(self, board: List[List[int]]) -> bool:
-        # Simplified terminal state function for demonstration
-        for x in range(self.BOARD_SIZE):
-            for y in range(self.BOARD_SIZE):
-                if board[x][y] != self.EMPTY and self._check_win(board, x, y, board[x][y]):
-                    return True
-        return False
-
-
-    # Add a basic board evaluation function
-        def _evaluate_board(self, board: List[List[int]], color: int) -> int:
-            score = 0
-            # Evaluate board based on various heuristic metrics
-            for x in range(self.BOARD_SIZE):
-                for y in range(self.BOARD_SIZE):
-                    if board[x][y] == color:
-                        # Offensive evaluation
-                        for dx, dy in self.DIRECTIONS:
-                            count = self._count_consecutive(board, x, y, color, dx, dy)
-                            score += count ** 2
-
-                        # Defensive evaluation - consider opponent threats
-                        opponent_color = self.BLACK if color == self.WHITE else self.WHITE
-                        for dx, dy in self.DIRECTIONS:
-                            opponent_count = self._count_consecutive(board, x, y, opponent_color, dx, dy)
-                            score -= opponent_count ** 2
-
-            return score
-
-    def _evaluate_position(self, board: List[List[int]], x: int, y: int, my_color: int, opponent_color: int) -> int:
-        """评估当前位置得分"""
-        score = 0
-
-        # Offensive potential: count own consecutive pieces
-        for dx, dy in self.DIRECTIONS:
-            own_count = self._count_consecutive(board, x, y, my_color, dx, dy)
-            score += own_count ** 2  # Favor longer sequences
-
-        # Defensive need: count opponent's consecutive pieces
-        for dx, dy in self.DIRECTIONS:
-            opponent_count = self._count_consecutive(board, x, y, opponent_color, dx, dy)
-            score += opponent_count ** 2
-
-        return score
         
         # ============================================================
         # END OF STRATEGY IMPLEMENTATION

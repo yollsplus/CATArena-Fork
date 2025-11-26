@@ -54,175 +54,64 @@ class GomokuAI:
     # ========================
     
     def select_best_move(self, board: List[List[int]], my_color: int, 
-                            opponent_color: int) -> Tuple[int, int]:
-            """
-            Selects the best move using Minimax with Alpha-Beta Pruning and a highly
-            detailed pattern-based evaluation heuristic.
-            """
-            import random
-            import time
-            from collections import defaultdict
-
-            start_time = time.time()
-
-            # --- Immediate Move Checks ---
-            if self._is_empty_board(board):
-                return (self.BOARD_SIZE // 2, self.BOARD_SIZE // 2)
-
-            win_move = self._find_winning_move(board, my_color)
-            if win_move:
-                return win_move
-
-            defend_move = self._find_winning_move(board, opponent_color)
-            if defend_move:
-                return defend_move
-
-            # --- Advanced Evaluation & Minimax ---
-
-            # More detailed pattern scores
-            PATTERN_SCORES = {
-                # My scores
-                (my_color, 5, True): 1000000, # Five in a row
-                (my_color, 4, True): 10000,   # Live Four
-                (my_color, 4, False): 5000,  # Dead Four
-                (my_color, 3, True): 1000,    # Live Three
-                (my_color, 3, False): 100,   # Dead Three
-                (my_color, 2, True): 50,      # Live Two
-                (my_color, 2, False): 10,    # Dead Two
-                # Opponent scores (negated, slightly higher for defense)
-                (opponent_color, 5, True): -1200000,
-                (opponent_color, 4, True): -11000,
-                (opponent_color, 4, False): -5500,
-                (opponent_color, 3, True): -1100, 
-                (opponent_color, 3, False): -110,
-                (opponent_color, 2, True): -55,
-                (opponent_color, 2, False): -11,
-            }
-
-            def evaluate_board_state(board):
-                """Evaluates the board by finding patterns and summing their scores."""
-                score = 0
-                # Directions: horizontal, vertical, diagonal, anti-diagonal
-                for r in range(self.BOARD_SIZE):
-                    for c in range(self.BOARD_SIZE):
-                        if board[r][c] == self.EMPTY:
-                            continue
-
-                        color = board[r][c]
-                        # Horizontal
-                        if c <= self.BOARD_SIZE - 5:
-                            score += get_pattern_score([board[r][c+i] for i in range(5)], color)
-                        # Vertical
-                        if r <= self.BOARD_SIZE - 5:
-                            score += get_pattern_score([board[r+i][c] for i in range(5)], color)
-                        # Diagonal
-                        if r <= self.BOARD_SIZE - 5 and c <= self.BOARD_SIZE - 5:
-                            score += get_pattern_score([board[r+i][c+i] for i in range(5)], color)
-                        # Anti-diagonal
-                        if r <= self.BOARD_SIZE - 5 and c >= 4:
-                            score += get_pattern_score([board[r+i][c-i] for i in range(5)], color)
-                return score
-
-            def get_pattern_score(window, color):
-                """Scores a single 5-stone window."""
-                count = window.count(color)
-                if count == 0: return 0
-
-                opponent = opponent_color if color == my_color else my_color
-                if opponent in window: return 0 # Mixed pattern has no value
-
-                # Check for live/dead ends (by looking at a 6-stone window)
-                is_live = False
-                # This is a simplification; true live/dead needs context outside the window
-                # But for a basic heuristic, we can check if ends are empty *within* the pattern
-                if count < 5:
-                    if window[0] == self.EMPTY and window[-1] == self.EMPTY:
-                        is_live = True
-
-                # A crude check for broken patterns, e.g., X_XX
-                if count == 3 and window.count(self.EMPTY) == 2:
-                    if window[1] == self.EMPTY or window[3] == self.EMPTY:
-                        return PATTERN_SCORES.get((color, 3, False), 0) / 2 # Reduced score for broken three
-
-                return PATTERN_SCORES.get((color, count, is_live), 0)
-
-            def get_candidates(board):
-                """Get a list of promising moves, sorted by a quick evaluation."""
-                candidates = set()
-                for r in range(self.BOARD_SIZE):
-                    for c in range(self.BOARD_SIZE):
-                        if board[r][c] == self.EMPTY:
-                            # Add if there is any stone in a 2-cell radius
-                            for dr in range(-2, 3):
-                                for dc in range(-2, 3):
-                                    if 0 <= r + dr < self.BOARD_SIZE and 0 <= c + dc < self.BOARD_SIZE and board[r+dr][c+dc] != self.EMPTY:
-                                        candidates.add((r, c))
-                                        break
-                                else:
-                                    continue
-                                break
-                return list(candidates) or self._get_random_empty_position(board)
-
-            def minimax(board, depth, alpha, beta, is_maximizing):
-                if depth == 0:
-                    return evaluate_board_state(board)
-
-                moves = get_candidates(board)
-                if not moves: 
-                    return evaluate_board_state(board)
-
-                if is_maximizing:
-                    max_eval = -float('inf')
-                    for r, c in moves:
-                        board[r][c] = my_color
-                        # Check for a win created by this move
-                        if self._check_win(board, r, c, my_color): 
-                            board[r][c] = self.EMPTY; return 1000000 - (3-depth)*10
-
-                        evaluation = minimax(board, depth - 1, alpha, beta, False)
-                        board[r][c] = self.EMPTY
-                        max_eval = max(max_eval, evaluation)
-                        alpha = max(alpha, evaluation)
-                        if beta <= alpha: break
-                    return max_eval
-                else: # Minimizing player
-                    min_eval = float('inf')
-                    for r, c in moves:
-                        board[r][c] = opponent_color
-                        if self._check_win(board, r, c, opponent_color):
-                             board[r][c] = self.EMPTY; return -1000000 + (3-depth)*10
-
-                        evaluation = minimax(board, depth - 1, alpha, beta, True)
-                        board[r][c] = self.EMPTY
-                        min_eval = min(min_eval, evaluation)
-                        beta = min(beta, evaluation)
-                        if beta <= alpha: break
-                    return min_eval
-
-            # --- Main Search ---
-            best_move = (-1, -1)
-            best_score = -float('inf')
-            search_depth = 2 # Depth 2 is a good balance for performance
-
-            candidate_moves = get_candidates(board)
-            if not candidate_moves: return self._get_random_empty_position(board)
-
-            for r, c in candidate_moves:
-                 if time.time() - start_time > self.MAX_TIME - 1: # Check for timeout
-                    break
-
-                 board[r][c] = my_color
-                 score = minimax(board, search_depth, -float('inf'), float('inf'), False)
-                 board[r][c] = self.EMPTY
-
-                 # Add a small positional bonus for center
-                 score += (7 - abs(r - 7)) + (7 - abs(c - 7))
-
-                 if score > best_score:
-                    best_score = score
-                    best_move = (r, c)
-
-            return best_move if best_move != (-1, -1) else candidate_moves[0]
+                        opponent_color: int) -> Tuple[int, int]:
+        """
+        选择最佳走法 - 这是你需要实现的核心策略函数
+        
+        参数:
+            board: 15x15的棋盘，0=空，1=黑，2=白
+            my_color: 我方颜色 (1或2)
+            opponent_color: 对手颜色 (1或2)
+        
+        返回:
+            (row, col): 你选择的走法位置
+        
+        提示:
+            - 优先考虑能立即获胜的走法
+            - 其次考虑防守对手的威胁
+            - 然后考虑建立自己的进攻态势
+            - 可以使用下面提供的辅助函数
+        """
+        # 第一步下中心
+        if self._is_empty_board(board):
+            center = self.BOARD_SIZE // 2
+            return (center, center)
+        
+        # 检查能否立即获胜
+        win_move = self._find_winning_move(board, my_color)
+        if win_move:
+            return win_move
+        
+        # 检查是否需要立即防守
+        defend_move = self._find_winning_move(board, opponent_color)
+        if defend_move:
+            return defend_move
+        
+        # ============================================================
+        # TODO: IMPLEMENT YOUR STRATEGY HERE
+        # ============================================================
+        # Current implementation: Simple random move
+        # 
+        # Suggestions for improvement:
+        # 1. Evaluate each candidate position's value
+        # 2. Consider forming patterns (live three, live four, etc.)
+        # 3. Block opponent's strong patterns
+        # 4. Control center positions
+        # 
+        # Available helper functions:
+        # - self._get_empty_positions_near_stones(board, distance=2)
+        # - self._count_consecutive(board, x, y, color, dx, dy)
+        # - self._check_win(board, x, y, color)
+        # ============================================================
+        
+        candidates = self._get_empty_positions_near_stones(board)
+        if candidates:
+            # TODO: Replace this with your evaluation logic
+            # Example: score each candidate and return the best one
+            return candidates[0]
+        
+        # Fallback: random empty position
+        return self._get_random_empty_position(board)
         
         # ============================================================
         # END OF STRATEGY IMPLEMENTATION
